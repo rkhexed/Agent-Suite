@@ -14,6 +14,7 @@ dependencies = [
     "langchain-google-genai",
     "langchain_core",
     "langgraph",
+    "msgraph-core",
     "pandas",
     "pydantic",
     "pytest",
