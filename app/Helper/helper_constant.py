@@ -8,3 +8,6 @@ GOOGLE_GENAI_API_KEY = access_secret_version(
     project_id = PROJECT_ID, secret_id = "google-genai-api-key"
 )
 
+PINECONE_API_KEY = access_secret_version(
+    project_id = PROJECT_ID, secret_id = "pinecone_agent_suite"
+)

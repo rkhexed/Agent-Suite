@@ -16,6 +16,7 @@ dependencies = [
     "langgraph",
     "msgraph-core",
     "pandas",
+    "pinecone",
     "pydantic",
     "pytest",
     "python-dotenv",
