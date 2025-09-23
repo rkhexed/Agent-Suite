@@ -6,6 +6,7 @@ authors = ["Kaushal Kumar Subramani <kaushalkmrgr8@gmail.com>"]
 requires-python = "==3.12.0"
 dependencies = [
     "asyncio",
+    "crewai",
     "datetime",
     "fastapi",
     "google",
@@ -27,5 +28,6 @@ dependencies = [
     "tqdm",
     "typing",
     "uuid",
+    "uv",
     "uvicorn",
 ]
