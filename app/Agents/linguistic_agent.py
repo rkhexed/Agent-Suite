@@ -5,6 +5,13 @@ from .basic_agent import BaseCybersecurityCrew, AgentRequest, AgentResponse
 from datetime import datetime
 import json
 import re
+import sys
+import os
+
+# Add the app directory to Python path for imports
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
+from LLM.llm import get_default_llm, get_creative_llm, get_analytical_llm
 
 
 class EmailContentTool(BaseTool):
@@ -91,6 +98,7 @@ class LinguisticAnalysisCrew(BaseCybersecurityCrew):
             social engineering tactics, phishing patterns, and linguistic indicators of malicious intent. 
             You excel at identifying subtle manipulation techniques and suspicious language patterns.""",
             tools=[self.email_tool],
+            llm=get_analytical_llm(),  # Use analytical LLM for precise content analysis
             verbose=True,
             allow_delegation=False
         )
@@ -103,6 +111,7 @@ class LinguisticAnalysisCrew(BaseCybersecurityCrew):
             emotional manipulation, urgency tactics, and psychological pressure techniques used in 
             malicious emails. You understand how attackers use language to create urgency and bypass 
             critical thinking.""",
+            llm=get_creative_llm(),  # Use creative LLM for psychological analysis
             verbose=True,
             allow_delegation=False
         )
@@ -115,6 +124,7 @@ class LinguisticAnalysisCrew(BaseCybersecurityCrew):
             linguistic patterns. You have extensive experience analyzing phishing emails, social 
             engineering attempts, and other malicious communications. You can spot subtle indicators 
             that others might miss.""",
+            llm=get_default_llm(),  # Use default LLM for balanced analysis
             verbose=True,
             allow_delegation=False
         )

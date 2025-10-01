@@ -8,13 +8,13 @@ import sys
 import argparse
 import asyncio
 from typing import Dict, Any
-from fastapi_service import FastAPICybersecurityService
+from .fastapi_service import FastAPICybersecurityService
 
 
 def create_linguistic_service(port: int = 8001) -> FastAPICybersecurityService:
     """Create and configure the linguistic analysis service"""
     try:
-        from linguistic_agent import LinguisticAnalysisCrew
+        from .linguistic_agent import LinguisticAnalysisCrew
         
         crew = LinguisticAnalysisCrew()
         return FastAPICybersecurityService(crew, "Linguistic Analysis", port)

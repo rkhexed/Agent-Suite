@@ -13,7 +13,7 @@ from typing import Dict, Any
 # Add the app directory to Python path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'app'))
 
-from Agents.service_runner import (
+from app.Agents.service_runner import (
     create_linguistic_service,
     create_technical_service,
     create_behavioral_service,
@@ -172,6 +172,7 @@ def main():
     if len(sys.argv) < 2:
         show_service_endpoints()
         print("\nUsage examples:")
+        print("  python main.py test-all         # Run comprehensive tests")
         print("  python main.py test-linguistic  # Test linguistic agent")
         print("  python main.py show-endpoints   # Show this help")
         print("  python main.py linguistic       # Start linguistic service")
@@ -183,6 +184,12 @@ def main():
     
     if command == "test-linguistic":
         asyncio.run(test_linguistic_agent())
+    
+    elif command == "test-all":
+        print("Running simple tests...")
+        import subprocess
+        result = subprocess.run([sys.executable, "simple_test.py"], capture_output=False)
+        return
     
     elif command == "show-endpoints":
         show_service_endpoints()

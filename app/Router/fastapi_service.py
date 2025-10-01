@@ -113,13 +113,23 @@ class FastAPICybersecurityService:
         """
         logger.info(f"Starting {self.service_name} service on {host}:{self.port}")
         
-        uvicorn.run(
-            self.app,
-            host=host,
-            port=self.port,
-            reload=reload,
-            log_level="info"
-        )
+        if reload:
+            # For development with reload, use import string
+            uvicorn.run(
+                "app.Agents.fastapi_service:app",
+                host=host,
+                port=self.port,
+                reload=True,
+                log_level="info"
+            )
+        else:
+            # For production, use app instance directly
+            uvicorn.run(
+                self.app,
+                host=host,
+                port=self.port,
+                log_level="info"
+            )
     
     def get_app(self) -> FastAPI:
         """Get the FastAPI app instance for testing or external ASGI server"""
