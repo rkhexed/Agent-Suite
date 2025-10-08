@@ -59,7 +59,7 @@ def get_gemini_pro():
         Gemini Pro LLM instance
     """
     return get_gemini_llm(
-        model="gemini/gemini-2.5-pro-preview-06-05",  # Using Gemini Pro model
+        model="gemini/gemini-2.0-flash",
         temperature=0.1
     )
 
