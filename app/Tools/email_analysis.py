@@ -1,9 +1,10 @@
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Type
 from crewai.tools import BaseTool
+from pydantic import BaseModel, Field
 import logging
 from datetime import datetime
 import asyncio
-from functools import wraps
+
 from app.Helper.helper_preprocessing import EmailPreprocessor
 from app.Helper.helper_constant import (
     THREAT_SCORE_WEIGHTS,
@@ -13,7 +14,8 @@ from app.Helper.helper_pydantic import (
     EmailContent,
     ThreatIndicator,
     ThreatLevel,
-    AnalysisResult
+    AnalysisResult,
+    EmailAnalysisInput
 )
 from app.ML.semantic_analysis import SemanticAnalyzer
 
@@ -21,21 +23,20 @@ from app.ML.semantic_analysis import SemanticAnalyzer
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-from pydantic import Field
 
 class EmailContentAnalysisTool(BaseTool):
-    name: str = Field(default="Advanced Email Analysis Tool")
-    description: str = Field(default="Enterprise-grade email analysis using ML models and semantic analysis")
-    preprocessor: Optional[EmailPreprocessor] = Field(default=None, exclude=True)
-    semantic_analyzer: Optional[SemanticAnalyzer] = Field(default=None, exclude=True)
+    name: str = "Advanced Email Analysis Tool"
+    description: str = "Enterprise-grade email analysis using ML models and semantic analysis. Analyzes email content for phishing attempts, social engineering, and security threats."
+    args_schema: Type[BaseModel] = EmailAnalysisInput
 
     def __init__(self, **data):
         """Initialize analysis components"""
         super().__init__(**data)
-        object.__setattr__(self, 'preprocessor', EmailPreprocessor())
-        object.__setattr__(self, 'semantic_analyzer', SemanticAnalyzer())
+        # Initialize components as private attributes
+        object.__setattr__(self, '_preprocessor', EmailPreprocessor())
+        object.__setattr__(self, '_semantic_analyzer', SemanticAnalyzer())
         
-    def _run(self, email_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _run(self, email_data: Dict[str, Any]) -> str:
         """
         Performs comprehensive email analysis using ML models and semantic analysis.
         
@@ -51,42 +52,36 @@ class EmailContentAnalysisTool(BaseTool):
                 }
                 
         Returns:
-            AnalysisResult containing:
-            - Threat level assessment
-            - Confidence scores
-            - Detailed threat indicators
-            - ML-based analysis results
-            - Actionable recommendations
+            JSON string containing analysis results
         """
         try:
             # Standardize input
-            email_content = self.preprocessor.standardize_content(email_data)
+            email_content = self._preprocessor.standardize_content(email_data)
             
             # Extract URLs from markdown content
-            urls = self.preprocessor.extract_markdown_links(email_content.body)
-            url_analysis = self.preprocessor.analyze_urls(urls)
+            urls = self._preprocessor.extract_markdown_links(email_content.body)
+            url_analysis = self._preprocessor.analyze_urls(urls)
             
             # Normalize text for analysis
-            normalized_text = self.preprocessor.normalize_text(
+            normalized_text = self._preprocessor.normalize_text(
                 f"{email_content.subject}\n\n{email_content.body}"
             )
             
-            # Perform ML-based analysis
+            # Perform ML-based analysis synchronously
+            # Check if there's a running event loop
             try:
-                # Try to get the running loop
                 loop = asyncio.get_running_loop()
-            except RuntimeError:
-                # If no loop is running, create a new one
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                semantic_indicators = loop.run_until_complete(
-                    self.semantic_analyzer.analyze_content(normalized_text)
+                # If there's a running loop, we need to create a task
+                import nest_asyncio
+                nest_asyncio.apply()
+                semantic_indicators = asyncio.run(
+                    self._semantic_analyzer.analyze_content(normalized_text)
                 )
-            else:
-                # If a loop is already running, create a task
-                semantic_indicators = loop.create_task(
-                    self.semantic_analyzer.analyze_content(normalized_text)
-                ).result()
+            except RuntimeError:
+                # No running loop, safe to use asyncio.run()
+                semantic_indicators = asyncio.run(
+                    self._semantic_analyzer.analyze_content(normalized_text)
+                )
             
             # Calculate overall threat level
             threat_level, confidence = self._calculate_threat_metrics(
@@ -115,11 +110,19 @@ class EmailContentAnalysisTool(BaseTool):
                 timestamp=datetime.utcnow()
             )
             
-            return result.dict()
+            # Return as JSON string per CrewAI best practices
+            import json
+            return json.dumps(result.dict(), default=str)
             
         except Exception as e:
             logger.error(f"Error in email analysis: {str(e)}", exc_info=True)
-            raise
+            error_result = {
+                "error": str(e),
+                "threat_level": "unknown",
+                "confidence_score": 0.0
+            }
+            import json
+            return json.dumps(error_result)
 
     def _calculate_threat_metrics(
         self,

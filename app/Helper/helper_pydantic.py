@@ -16,6 +16,10 @@ class EmailContent(BaseModel):
     recipients: List[EmailStr]
     date: datetime
     headers: Dict[str, str]
+
+class EmailAnalysisInput(BaseModel):
+    """Input schema for EmailContentAnalysisTool."""
+    email_data: Dict[str, Any] = Field(..., description="Email content data including subject, body, sender, recipients, date, and headers")
     
 class ThreatIndicator(BaseModel):
     type: str
