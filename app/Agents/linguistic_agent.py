@@ -86,41 +86,69 @@ class LinguisticAnalysisCrew(BaseCybersecurityCrew):
         confidence_score = 0.0
         
         try:
-            # Extract structured data from ML analysis result
-            if isinstance(result, dict):
-                model_output = result
-            elif hasattr(result, 'raw'):
-                model_output = result.raw
-            else:
-                model_output = {"raw_text": str(result)}
+            # Get the tool output directly from the crew execution
+            # The tool returns structured JSON that we can parse directly
+            import json
             
-            # Process threat indicators
-            if "indicators" in model_output:
-                findings.extend([
-                    ThreatIndicator(
-                        type=indicator.get("type", "unknown"),
-                        severity=ThreatLevel[indicator.get("severity", "LOW").upper()],
-                        confidence=indicator.get("confidence", 0.5),
-                        description=indicator.get("description", "No description provided")
-                    ).dict()
-                    for indicator in model_output["indicators"]
-                ])
+            tool_output = None
+            
+            # Try to extract tool output from CrewAI result
+            if hasattr(result, 'tasks_output') and result.tasks_output:
+                # Get the first task's output (our analysis task)
+                task_output = result.tasks_output[0]
+                if hasattr(task_output, 'exported_output'):
+                    tool_output = task_output.exported_output
+            
+            # If we found tool output, parse it directly
+            if tool_output:
+                if isinstance(tool_output, str):
+                    model_output = json.loads(tool_output)
+                else:
+                    model_output = tool_output
                 
-            # Calculate overall confidence from ML model scores
-            if findings:
-                confidence_score = sum(f["confidence"] for f in findings) / len(findings)
-            
-            # Extract ML-based recommendations
-            if "recommendations" in model_output:
-                recommendations = model_output["recommendations"]
-            
-            # Add model-specific metadata
-            findings.append({
-                "type": "model_metadata",
-                "severity": "info",
-                "confidence": 1.0,
-                "description": "Analysis performed using transformer models and semantic analysis"
-            })
+                # Process threat indicators directly from tool
+                if "indicators" in model_output:
+                    findings.extend([
+                        {
+                            "type": indicator.get("type", "unknown"),
+                            "severity": indicator.get("severity", "low"),
+                            "confidence": indicator.get("confidence", 0.5),
+                            "description": indicator.get("description", "No description"),
+                            "evidence": indicator.get("evidence", [])
+                        }
+                        for indicator in model_output["indicators"]
+                    ])
+                
+                # Get confidence score from tool
+                if "confidence_score" in model_output:
+                    confidence_score = model_output["confidence_score"]
+                elif findings:
+                    confidence_score = sum(f["confidence"] for f in findings) / len(findings)
+                
+                # Get recommendations from tool
+                if "recommendations" in model_output:
+                    recommendations = model_output["recommendations"]
+                
+                # Add metadata
+                findings.append({
+                    "type": "analysis_metadata",
+                    "severity": "info",
+                    "confidence": 1.0,
+                    "description": f"ML model confidence: {confidence_score:.4f}",
+                    "evidence": [f"Tool version: {model_output.get('metadata', {}).get('tool_version', 'unknown')}"]
+                })
+            else:
+                # Fallback: couldn't extract tool output
+                logger.warning("Could not extract tool output, using fallback parsing")
+                findings = [{
+                    "type": "info",
+                    "severity": "info",
+                    "confidence": 0.5,
+                    "description": "Analysis completed - see LLM narrative for details",
+                    "evidence": [str(result)[:200]]  # First 200 chars of result
+                }]
+                confidence_score = 0.5
+                recommendations = ["Review full analysis output"]
             
         except Exception as e:
             logger.error(f"Error parsing ML model results: {str(e)}", exc_info=True)
