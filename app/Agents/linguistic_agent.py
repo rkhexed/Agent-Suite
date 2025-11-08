@@ -6,7 +6,7 @@ import logging
 
 from app.Tools.email_analysis import EmailContentAnalysisTool
 from app.ML.semantic_analysis import SemanticAnalyzer
-from app.LLM.llm import get_gemini_pro
+from app.LLM.llm import get_groq_llama_70b  # Using Groq (FREE + FAST)
 from app.Helper.helper_pydantic import ThreatLevel, ThreatIndicator
 
 # Configure logging
@@ -36,7 +36,7 @@ class LinguisticAnalysisCrew(BaseCybersecurityCrew):
             models and semantic analysis to detect subtle patterns and anomalies in email content. 
             Your analysis is data-driven and based on model outputs rather than static rules.""",
             tools=[self.email_tool],
-            llm=get_gemini_pro(),
+            llm=get_groq_llama_70b(),
             verbose=True,
             allow_delegation=False
         )
@@ -86,38 +86,38 @@ class LinguisticAnalysisCrew(BaseCybersecurityCrew):
         confidence_score = 0.0
         
         try:
-            # Get the tool output directly from the crew execution
-            # The tool returns structured JSON that we can parse directly
             import json
             
-            tool_output = None
+            model_output = None
             
-            # Try to extract tool output from CrewAI result
-            if hasattr(result, 'tasks_output') and result.tasks_output:
-                # Get the first task's output (our analysis task)
-                task_output = result.tasks_output[0]
-                if hasattr(task_output, 'exported_output'):
-                    tool_output = task_output.exported_output
-            
-            # If we found tool output, parse it directly
-            if tool_output:
-                if isinstance(tool_output, str):
-                    model_output = json.loads(tool_output)
-                else:
-                    model_output = tool_output
+            # The tool returns JSON, but CrewAI wraps it in the agent's narrative
+            # Try to extract the JSON from the raw output
+            if hasattr(result, 'raw') and result.raw:
+                raw_str = str(result.raw)
+                # The LLM returns a narrative, but we want the tool's JSON output
+                # Look for JSON structure in the output
+                json_start = raw_str.find('{')
+                json_end = raw_str.rfind('}') + 1
                 
+                if json_start >= 0 and json_end > json_start:
+                    try:
+                        potential_json = raw_str[json_start:json_end]
+                        model_output = json.loads(potential_json)
+                        logger.info(f"Extracted tool output from raw (found JSON with {len(model_output.get('indicators', []))} indicators)")
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Failed to parse JSON from raw output: {e}")
+            
+            # If we successfully extracted and parsed the tool output
+            if model_output and isinstance(model_output, dict) and "indicators" in model_output:
                 # Process threat indicators directly from tool
-                if "indicators" in model_output:
-                    findings.extend([
-                        {
-                            "type": indicator.get("type", "unknown"),
-                            "severity": indicator.get("severity", "low"),
-                            "confidence": indicator.get("confidence", 0.5),
-                            "description": indicator.get("description", "No description"),
-                            "evidence": indicator.get("evidence", [])
-                        }
-                        for indicator in model_output["indicators"]
-                    ])
+                for indicator in model_output["indicators"]:
+                    findings.append({
+                        "type": indicator.get("type", "unknown"),
+                        "severity": str(indicator.get("severity", "low")).replace("ThreatLevel.", ""),
+                        "confidence": indicator.get("confidence", 0.5),
+                        "description": indicator.get("description", "No description"),
+                        "evidence": indicator.get("evidence", [])
+                    })
                 
                 # Get confidence score from tool
                 if "confidence_score" in model_output:
@@ -129,14 +129,8 @@ class LinguisticAnalysisCrew(BaseCybersecurityCrew):
                 if "recommendations" in model_output:
                     recommendations = model_output["recommendations"]
                 
-                # Add metadata
-                findings.append({
-                    "type": "analysis_metadata",
-                    "severity": "info",
-                    "confidence": 1.0,
-                    "description": f"ML model confidence: {confidence_score:.4f}",
-                    "evidence": [f"Tool version: {model_output.get('metadata', {}).get('tool_version', 'unknown')}"]
-                })
+                logger.info(f"✅ Successfully parsed {len(findings)} indicators with {confidence_score:.2%} confidence")
+                
             else:
                 # Fallback: couldn't extract tool output
                 logger.warning("Could not extract tool output, using fallback parsing")

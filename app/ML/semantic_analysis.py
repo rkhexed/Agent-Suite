@@ -1,12 +1,13 @@
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, pipeline
 import torch
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 import numpy as np
 from sentence_transformers import SentenceTransformer
 import logging
 from app.Helper.helper_pydantic import ThreatLevel, ThreatIndicator
 from pathlib import Path
 import os
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +28,6 @@ class SemanticAnalyzer:
     def _initialize_models(self):
         """Initialize all required models"""
         try:
-            # Using a FINE-TUNED phishing detection model (65.8M downloads, verified)
-            # This model is specifically trained on phishing email datasets
             logger.info("Loading fine-tuned phishing detection model...")
             self.phishing_tokenizer = AutoTokenizer.from_pretrained("dima806/phishing-email-detection")
             self.phishing_model = AutoModelForSequenceClassification.from_pretrained(
@@ -36,15 +35,18 @@ class SemanticAnalyzer:
             ).to(self.device)
             logger.info("✓ Phishing detection model loaded (fine-tuned)")
 
-            # Semantic similarity model (this one is publicly available)
+            # Semantic similarity model
             self.similarity_model = SentenceTransformer('all-MiniLM-L6-v2')
-            logger.info("✓ Semantic similarity model loaded")
+            logger.info("Semantic similarity model loaded")
 
-            # Intent classification - using same phishing model for now
-            # TODO: Replace with specialized intent classifier when available
             self.intent_tokenizer = self.phishing_tokenizer
             self.intent_model = self.phishing_model
             logger.info("✓ Intent classification model loaded (using phishing model)")
+
+            # Named Entity Recognition for authority detection
+            logger.info("Loading NER model for authority exploitation detection")
+            self.ner_pipeline = pipeline("ner", model="dslim/bert-base-NER", device=0 if torch.cuda.is_available() else -1)
+            logger.info("NER model loaded")
 
             logger.info("All models initialized successfully")
         except Exception as e:
@@ -53,7 +55,7 @@ class SemanticAnalyzer:
 
     async def analyze_content(self, text: str) -> List[ThreatIndicator]:
         """
-        Perform comprehensive semantic analysis on text content.
+        Perform comprehensive semantic analysis on text content using ML models.
         
         Args:
             text: The email content to analyze
@@ -64,7 +66,7 @@ class SemanticAnalyzer:
         indicators = []
         
         try:
-            # Phishing detection
+            # 1. Phishing detection using fine-tuned transformer model
             phishing_score = await self._detect_phishing(text)
             if phishing_score > 0.6:
                 indicators.append(
@@ -73,11 +75,11 @@ class SemanticAnalyzer:
                         severity=ThreatLevel.HIGH if phishing_score > 0.8 else ThreatLevel.MEDIUM,
                         confidence=phishing_score,
                         description="Potential phishing attempt detected",
-                        evidence=[f"Phishing confidence score: {phishing_score:.2f}"]
+                        evidence=[f"ML model confidence: {phishing_score:.4f}"]
                     )
                 )
 
-            # Intent classification
+            # 2. Intent classification using transformer model
             intent_results = await self._classify_intent(text)
             if intent_results["suspicious"] > 0.7 or intent_results["urgent"] > 0.8:
                 indicators.append(
@@ -86,11 +88,11 @@ class SemanticAnalyzer:
                         severity=ThreatLevel.MEDIUM,
                         confidence=max(intent_results["suspicious"], intent_results["urgent"]),
                         description="Suspicious or urgent intent detected",
-                        evidence=[f"Intent scores: {intent_results}"]
+                        evidence=[f"Intent classification: {intent_results}"]
                     )
                 )
 
-            # Semantic similarity to known patterns
+            # 3. Semantic similarity to known threat patterns using embeddings
             similarity_results = await self._check_semantic_similarity(text)
             if similarity_results["max_score"] > 0.85:
                 indicators.append(
@@ -98,8 +100,8 @@ class SemanticAnalyzer:
                         type="pattern_match",
                         severity=ThreatLevel.MEDIUM,
                         confidence=similarity_results["max_score"],
-                        description=f"Similar to known pattern: {similarity_results['pattern_type']}",
-                        evidence=[f"Similarity score: {similarity_results['max_score']:.2f}"]
+                        description=f"Semantically similar to known {similarity_results['pattern_type']} pattern",
+                        evidence=[f"Cosine similarity: {similarity_results['max_score']:.4f}"]
                     )
                 )
 
@@ -128,11 +130,16 @@ class SemanticAnalyzer:
             with torch.no_grad():
                 outputs = self.intent_model(**inputs)
                 scores = torch.softmax(outputs.logits, dim=1)
+                
+                # Model only has 2 outputs (legitimate/phishing), map to 4 categories
+                phishing_score = scores[0][1].item()
+                legit_score = scores[0][0].item()
+                
                 return {
-                    "suspicious": scores[0][0].item(),
-                    "urgent": scores[0][1].item(),
-                    "informative": scores[0][2].item(),
-                    "request": scores[0][3].item()
+                    "suspicious": phishing_score,
+                    "urgent": phishing_score * 0.8,  # Correlate with phishing
+                    "informative": legit_score,
+                    "request": legit_score * 0.5
                 }
         except Exception as e:
             logger.error(f"Error in intent classification: {str(e)}")

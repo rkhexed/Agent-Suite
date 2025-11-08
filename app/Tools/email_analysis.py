@@ -58,10 +58,6 @@ class EmailContentAnalysisTool(BaseTool):
             # Standardize input
             email_content = self._preprocessor.standardize_content(email_data)
             
-            # Extract URLs from markdown content
-            urls = self._preprocessor.extract_markdown_links(email_content.body)
-            url_analysis = self._preprocessor.analyze_urls(urls)
-            
             # Normalize text for analysis
             normalized_text = self._preprocessor.normalize_text(
                 f"{email_content.subject}\n\n{email_content.body}"
@@ -84,15 +80,11 @@ class EmailContentAnalysisTool(BaseTool):
                 )
             
             # Calculate overall threat level
-            threat_level, confidence = self._calculate_threat_metrics(
-                semantic_indicators,
-                url_analysis
-            )
+            threat_level, confidence = self._calculate_threat_metrics(semantic_indicators)
             
             # Generate comprehensive recommendations
             recommendations = self._generate_recommendations(
                 semantic_indicators,
-                url_analysis,
                 email_content
             )
             
@@ -103,7 +95,6 @@ class EmailContentAnalysisTool(BaseTool):
                 indicators=semantic_indicators,
                 recommendations=recommendations,
                 metadata={
-                    "url_analysis": url_analysis,
                     "analysis_timestamp": datetime.utcnow().isoformat(),
                     "tool_version": "2.0.0"
                 },
@@ -126,46 +117,50 @@ class EmailContentAnalysisTool(BaseTool):
 
     def _calculate_threat_metrics(
         self,
-        indicators: List[ThreatIndicator],
-        url_analysis: Dict[str, Any]
+        indicators: List[ThreatIndicator]
     ) -> tuple[ThreatLevel, float]:
-        """Calculate overall threat level and confidence score"""
+        """
+        Calculate overall threat level and confidence score
+        """
         
-        # Get highest severity indicator
-        max_severity = max(
-            (ind.severity for ind in indicators),
-            default=ThreatLevel.LOW
-        )
+        # Define severity ordering
+        severity_order = {
+            ThreatLevel.LOW: 1,
+            ThreatLevel.MEDIUM: 2,
+            ThreatLevel.HIGH: 3,
+            ThreatLevel.CRITICAL: 4
+        }
         
-        # Calculate confidence based on indicator consensus
+        # Get highest severity indicator from ML models
+        if indicators:
+            max_severity = max(
+                (ind.severity for ind in indicators),
+                key=lambda x: severity_order.get(x, 0)
+            )
+        else:
+            max_severity = ThreatLevel.LOW
+        
+        # Calculate confidence based on ML model consensus
         confidence_scores = [ind.confidence for ind in indicators]
         avg_confidence = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0.5
-        
-        # Adjust for URL analysis
-        if url_analysis["shortened_urls"] or url_analysis["suspicious_domains"]:
-            max_severity = max(max_severity, ThreatLevel.MEDIUM)
-            avg_confidence = min(1.0, avg_confidence + 0.1)
             
         return max_severity, avg_confidence
 
     def _generate_recommendations(
         self,
         indicators: List[ThreatIndicator],
-        url_analysis: Dict[str, Any],
         email_content: EmailContent
     ) -> List[str]:
-        """Generate context-aware recommendations"""
+        """
+        Generate context-aware recommendations based on ML-detected threat types.
+        
+        Maps ML model detections to actionable security recommendations.
+        """
         recommendations = set()
         
-        # Add recommendations based on threat types
+        # Add recommendations based on ML-detected threat types
         for indicator in indicators:
             if indicator.type in RECOMMENDATION_TEMPLATES:
                 recommendations.update(RECOMMENDATION_TEMPLATES[indicator.type])
-        
-        # Add URL-specific recommendations
-        if url_analysis["shortened_urls"]:
-            recommendations.add(
-                "Avoid clicking shortened URLs. Request the full, original URL from the sender."
-            )
                 
         return sorted(list(recommendations))
