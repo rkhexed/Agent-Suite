@@ -61,3 +61,46 @@ class TechnicalValidationInput(BaseModel):
         ..., 
         description="Email data with sender and body for technical validation"
     )
+
+# Threat Intelligence Models
+class ThreatSource(BaseModel):
+    """Individual threat intelligence source result"""
+    source_name: str  # "Google Safe Browsing", "AbuseIPDB"
+    is_malicious: bool
+    threat_type: Optional[str] = None  # "MALWARE", "PHISHING", "SOCIAL_ENGINEERING"
+    confidence: float = Field(ge=0.0, le=1.0, default=0.5)
+    details: Optional[str] = None
+
+class URLThreatCheck(BaseModel):
+    """Threat check result for a single URL"""
+    url: str
+    is_malicious: bool
+    threat_sources: List[ThreatSource]
+    risk_score: float = Field(ge=0.0, le=1.0)
+    checked_at: datetime = Field(default_factory=datetime.utcnow)
+
+class IPReputationCheck(BaseModel):
+    """IP reputation check result"""
+    ip_address: str
+    is_malicious: bool
+    abuse_confidence_score: int = Field(ge=0, le=100)  # AbuseIPDB score
+    total_reports: int = 0
+    country_code: Optional[str] = None
+    usage_type: Optional[str] = None  # "Data Center", "ISP", etc.
+
+class ThreatIntelligenceResult(BaseModel):
+    """Complete threat intelligence analysis result"""
+    risk_score: float = Field(ge=0.0, le=1.0)
+    confidence: float = Field(ge=0.0, le=1.0)
+    urls_checked: List[URLThreatCheck]
+    ip_reputation: Optional[IPReputationCheck] = None
+    malicious_count: int = 0
+    total_checks: int = 0
+    processing_time_ms: int
+
+class ThreatIntelligenceInput(BaseModel):
+    """Input schema for Threat Intelligence Tool"""
+    email_data: Dict[str, Any] = Field(
+        ..., 
+        description="Email data with URLs and sender information for threat intelligence checking"
+    )
