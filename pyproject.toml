@@ -41,4 +41,7 @@ dependencies = [
     "uuid",
     "uv",
     "uvicorn",
+    "dnspython>=2.8.0",
+    "python-whois>=0.9.6",
+    "levenshtein>=0.27.3",
 ]
