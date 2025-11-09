@@ -5,12 +5,13 @@
 This document outlines the implementation of a multi-agent email security system with **three specialized agents** coordinated by a central Coordination Agent. This is a research-focused implementation suitable for academic evaluation, not enterprise deployment.
 
 **Agents:**
-1. **Linguistic Analysis Agent** - ML-based semantic/psychological manipulation detection
-2. **Technical Forensics Agent** - Infrastructure validation (SPF/DKIM/DMARC, headers, domain age)
-3. **Threat Intelligence Agent** - Known threat correlation (threat feeds, IOC matching, campaigns)
+1. **Linguistic Analysis Agent** - ML-based semantic/psychological manipulation detection (Weight: 0.60)
+2. **Technical Validation Agent** - Lightweight domain age validation via WHOIS (Weight: 0.20)
+3. **Threat Intelligence Agent** - Known threat correlation via Google Safe Browsing & AbuseIPDB (Weight: 0.20)
 
 **Removed from Research Scope:**
 - ~~Behavioral Pattern Agent~~ - Requires historical email database and enterprise-scale data collection (not suitable for research/academic setting)
+- ~~VirusTotal Integration~~ - Rate limits (4 req/min) too restrictive for evaluation dataset processing
 
 ## Architecture Diagram
 
@@ -18,8 +19,8 @@ This document outlines the implementation of a multi-agent email security system
 ┌───────────────────────────────────────────────────────────┐
 │                  Coordination Agent                        │
 │  (Confidence-Weighted Aggregation + Explainability)       │
-│  Weights: Linguistic 0.34, Technical 0.33,                │
-│           ThreatIntel 0.33                                │
+│  Weights: Linguistic 0.60, Technical 0.20,                │
+│           ThreatIntel 0.20                                │
 └────────────────┬──────────────────────────────────────────┘
                  │
         ┌────────┴────────┐
@@ -31,11 +32,11 @@ This document outlines the implementation of a multi-agent email security system
      │           │           │           │
 ┌────▼────┐ ┌───▼────┐ ┌───▼─────┐ ┌───▼────┐
 │Linguistic│ │Technical│ │ Threat  │ │  ML    │
-│ Analysis │ │Forensics│ │  Intel  │ │ Models │
+│ Analysis │ │Validation│ │  Intel  │ │ Models │
 │  Agent   │ │  Agent  │ │  Agent  │ │ Layer  │
-│          │ │         │ │         │ │        │
-│ ML-Based │ │Infra    │ │Known    │ │BERT    │
-│Semantics │ │Validate │ │Threats  │ │Models  │
+│ (60%)    │ │  (20%)  │ │  (20%)  │ │        │
+│ ML-Based │ │Domain   │ │Google SB│ │BERT    │
+│Semantics │ │Age Check│ │AbuseIPDB│ │99.98%  │
 └─────┬────┘ └────┬───┘ └────┬────┘ └────┬───┘
       │           │           │           │
       └───────────┴───────────┴───────────┘
@@ -49,9 +50,15 @@ This document outlines the implementation of a multi-agent email security system
 
 ## Agent Specifications
 
-### 1. Linguistic Analysis Agent (Weight: 0.34)
+### 1. Linguistic Analysis Agent (Weight: 0.60 - PRIMARY DEFENSE)
 
 **Purpose:** Detect psychological manipulation tactics in email content using ML models only (no pattern matching)
+
+**Rationale for 60% Weight:** 
+- Pure ML-based detection (99.98% BERT accuracy)
+- Most effective against zero-day phishing attacks
+- Detects social engineering regardless of infrastructure
+- Research-worthy contribution (novel ML application)
 
 **Capabilities:**
 - Phishing detection using fine-tuned transformer models
@@ -98,146 +105,106 @@ This document outlines the implementation of a multi-agent email security system
 
 ---
 
-### 2. Technical Forensics Agent (Weight: 0.33)
+### 2. Technical Validation Agent (Weight: 0.20 - LIGHTWEIGHT INFRASTRUCTURE)
 
-**Scope:** Infrastructure validation ONLY - does NOT query threat feeds (that's Threat Intelligence Agent's job)
+**Scope:** Ultra-lightweight domain age validation ONLY (no SPF/DKIM/DMARC - redundant with email providers)
 
-**Purpose:** Validate email infrastructure authenticity (is this email technically legitimate?)
+**Purpose:** Detect suspiciously new domains (< 30 days) which is a strong phishing indicator
+
+**Rationale for 20% Weight:**
+- Single focused signal (domain age)
+- Data-driven threshold (< 30 days = phishing)
+- Fast WHOIS lookups (~500ms)
+- Academically defensible metric
 
 **Capabilities:**
-1. **Email Authentication** (RFC standard validation)
-   - SPF (Sender Policy Framework) validation via DNS
-   - DKIM (DomainKeys Identified Mail) verification
-   - DMARC (Domain-based Message Authentication) checks
+1. **Domain Age Validation**
+   - WHOIS lookups (domain registration date)
+   - Age calculation in days
+   - Risk scoring based on age thresholds
    
-2. **Domain Infrastructure Analysis**
-   - WHOIS lookups (domain age, registration date)
-   - Typosquatting detection (Levenshtein distance vs known brands)
-   - Disposable email domain detection
-   - DNS MX record validation
+2. **URL Metrics** (basic counting only)
+   - URL extraction from email body
+   - Count of URLs in email
+   - External link detection
 
-3. **Header Anomaly Detection**
-   - From/Return-Path mismatch detection
-   - Display name spoofing
-   - Unusual Received chain routing
-   - Missing/malformed standard headers
-
-4. **URL Structure Analysis** (structural validation only)
-   - URL shortener detection (bit.ly, tinyurl.com, etc.)
-   - Non-standard port detection
-   - Protocol validation (http vs https)
-   - Malformed URL detection
-
-**External Integrations (Infrastructure only, NO threat feeds):**
-- WHOIS lookups (domain age/registration) - FREE
-- DNS queries (SPF/DKIM/DMARC records) - FREE
-- No VirusTotal, PhishTank, etc. (moved to Threat Intelligence Agent)
+**External Integrations:**
+- WHOIS lookups via `python-whois` - FREE, no API key
+- DNS queries via `dnspython` - FREE, no API key
 
 **Input:**
-- Email headers (full raw headers)
-- URLs extracted from email body
-- Sender domain and IP address
-- Email metadata
+- Email sender address
+- Email body (for URL extraction)
 
 **Output:**
 ```python
 {
-    "agent": "technical_forensics",
-    "risk_score": 0.72,
-    "confidence": 0.95,
-    "authentication": {
-        "spf": {"status": "FAIL", "confidence": 1.0, "details": "Sender IP not authorized"},
-        "dkim": {"status": "PASS", "confidence": 1.0, "details": "Valid signature"},
-        "dmarc": {"status": "FAIL", "confidence": 1.0, "details": "Policy=reject, SPF failed"}
-    },
-    "domain_infrastructure": {
-        "sender_domain": "suspicious-bank.com",
+    "agent": "technical_validation",
+    "risk_score": 0.7,
+    "confidence": 0.9,
+    "domain_validation": {
+        "domain": "suspicious-newsite.com",
         "age_days": 15,
-        "registration_date": "2024-10-24",
-        "registrar": "Namecheap",
-        "is_disposable": false,
-        "typosquatting_target": "legitimate-bank.com",
-        "typosquatting_distance": 1,  # Levenshtein distance
-        "mx_records_valid": true
+        "registration_date": "2025-10-24T00:00:00",
+        "is_new_domain": true,  # < 30 days
+        "risk_score": 0.7,
+        "whois_available": true
     },
-    "header_anomalies": [
-        {
-            "type": "mismatched_from",
-            "severity": "HIGH",
-            "description": "Display name 'Legitimate Bank' doesn't match domain 'suspicious-bank.com'",
-            "confidence": 1.0
-        },
-        {
-            "type": "unusual_routing",
-            "severity": "MEDIUM",
-            "description": "Email routed through 7 countries in unusual pattern",
-            "confidence": 0.75
-        }
-    ],
-    "url_structure": [
-        {
-            "url": "http://bit.ly/abc123",
-            "is_shortened": true,
-            "protocol": "http",  # not https
-            "uses_non_standard_port": false,
-            "structure_risk": 0.6
-        }
-    ],
+    "url_count": 1,
+    "has_external_links": true,
     "processing_time_ms": 567
 }
 ```
 
-**Status:** 🔲 NOT YET IMPLEMENTED
+**Risk Thresholds:**
+- < 7 days: 0.9 (very high risk)
+- < 30 days: 0.7 (high risk - phishing threshold)
+- < 90 days: 0.4 (medium risk)
+- < 365 days: 0.2 (low-medium risk)
+- >= 365 days: 0.1 (established domain)
+
+**Status:** ✅ IMPLEMENTED - WHOIS-based domain age validation working
 
 **Dependencies:**
+- `python-whois` (WHOIS lookups)
 - `dnspython` (DNS queries)
 - `python-whois` (WHOIS lookups)
 - `Levenshtein` (typosquatting detection)
 
 ---
 
-### 3. Threat Intelligence Agent (Weight: 0.33)
+### 3. Threat Intelligence Agent (Weight: 0.20 - KNOWN THREAT DETECTION)
 
-**Scope:** Known threat correlation ONLY - does NOT do infrastructure validation (that's Technical Forensics Agent's job)
+**Scope:** Query external threat intelligence databases ONLY (does NOT do infrastructure validation)
 
-**Purpose:** Correlate email artifacts with known threats and campaigns (has this threat been seen before?)
+**Purpose:** Check URLs and IPs against global threat intelligence feeds to detect known malicious entities
+
+**Rationale for 20% Weight:**
+- Catches known phishing campaigns and malware distribution
+- Complements ML detection (known vs unknown threats)
+- Fast API calls (~500ms for Google Safe Browsing)
+- **NO VirusTotal** (rate limits too restrictive: 4 req/min)
 
 **Capabilities:**
-1. **Threat Feed Lookups**
-   - PhishTank (known phishing URLs) - FREE, unlimited
-   - VirusTotal (URL/domain/IP reputation) - FREE tier: 500/day
-   - AlienVault OTX (global threat intelligence) - FREE
-   - Abuse.ch URLhaus/ThreatFox (malicious URLs) - FREE
+1. **URL Threat Intelligence**
+   - Google Safe Browsing API (10,000 req/day)
+   - Checks URLs against phishing/malware databases
+   - Threat type classification (MALWARE, SOCIAL_ENGINEERING, UNWANTED_SOFTWARE)
 
-2. **Campaign Correlation**
-   - Match to known attack campaigns
-   - Threat actor attribution
-   - Attack pattern recognition
-   - Temporal correlation (active campaigns)
+2. **IP Reputation Checking**
+   - AbuseIPDB API (1,000 req/day)
+   - IP abuse confidence scoring (0-100%)
+   - Spam/malware/brute-force history
+   - Geographic origin and usage type
 
-3. **IOC (Indicators of Compromise) Matching**
-   - URL/domain matching against threat feeds
-   - IP address blacklist checking
-   - File hash matching (attachments)
-   - Content hash correlation
-
-4. **MITRE ATT&CK Mapping**
-   - Technique identification (T1566.001, etc.)
-   - Tactic classification
-   - Kill chain analysis
-
-**External Integrations (Threat feeds only, NO infrastructure validation):**
-- PhishTank API - FREE
-- VirusTotal API - FREE tier (500/day)
-- AlienVault OTX - FREE
-- Abuse.ch (URLhaus, ThreatFox) - FREE
-- MISP (optional) - FREE
+**External Integrations (Threat feeds only):**
+- Google Safe Browsing API - FREE (10,000/day)
+- AbuseIPDB API - FREE (1,000/day)
+- **Excluded:** VirusTotal (4 req/min too restrictive), PhishTank (redundant with Google SB), AlienVault OTX (overkill for research)
 
 **Input:**
-- Email content hashes
-- URLs and domains
-- IP addresses
-- File attachments (hashes)
+- URLs extracted from email body
+- Sender IP address from headers
 - Email metadata
 
 **Output:**
@@ -245,38 +212,43 @@ This document outlines the implementation of a multi-agent email security system
 {
     "agent": "threat_intelligence",
     "risk_score": 0.88,
-    "confidence": 0.93,
-    "threat_feeds": [
+    "confidence": 0.95,
+    "urls_checked": [
         {
-            "feed": "PhishTank",
-            "url": "http://malicious-domain.com",
-            "status": "KNOWN_PHISHING",
-            "first_reported": "2024-11-01",
-            "confidence": 1.0
-        },
-        {
-            "feed": "VirusTotal",
-            "url": "http://malicious-domain.com",
-            "detections": 45,
-            "total_engines": 90,
-            "categories": ["phishing", "malware"],
-            "threat_score": 0.95
-        },
-        {
-            "feed": "AlienVault_OTX",
-            "domain": "malicious-domain.com",
-            "pulse_count": 12,
-            "threat_score": 9.2,
-            "associated_malware": ["Emotet", "TrickBot"]
+            "url": "http://malicious-domain.com/phish.html",
+            "is_malicious": true,
+            "risk_score": 0.95,
+            "threat_sources": [
+                {
+                    "source": "Google Safe Browsing",
+                    "malicious": true,
+                    "threat_type": "SOCIAL_ENGINEERING",
+                    "confidence": 0.95,
+                    "details": "Flagged as phishing site"
+                }
+            ]
         }
     ],
-    "campaign_matches": [
-        {
-            "campaign_id": "APT-2024-1337",
-            "campaign_name": "Banking Trojan Campaign Q4 2024",
-            "confidence": 0.89,
-            "first_seen": "2024-10-15",
-            "threat_actor": "TA505",
+    "ip_reputation": {
+        "ip_address": "185.220.101.50",
+        "is_malicious": true,
+        "abuse_score": 87,  # 0-100 (AbuseIPDB confidence)
+        "total_reports": 145,
+        "country": "RU",
+        "usage_type": "Data Center"
+    },
+    "malicious_count": 2,  # URLs + IP flagged
+    "total_checks": 2,
+    "processing_time_ms": 523
+}
+```
+
+**Status:** ✅ IMPLEMENTED - Google Safe Browsing & AbuseIPDB integration complete
+
+**Dependencies:**
+- `requests` (HTTP for API calls)
+- Google Safe Browsing API key (FREE, set in .env)
+- AbuseIPDB API key (FREE, set in .env)
             "active": true
         }
     ],
@@ -313,15 +285,17 @@ This document outlines the implementation of a multi-agent email security system
 
 ### 4. Coordination Agent (Master Agent)
 
-**Purpose:** Synthesize all agent outputs and generate final assessment
+**Purpose:** Synthesize all agent outputs, generate final assessment, and recommend automated actions
 
 **Aggregation Formula:**
 ```python
 # Base weights (3-agent system for research)
+# Linguistic is primary (60%) - ML-based, detects zero-day attacks
+# Technical + ThreatIntel are supporting (20% each)
 weights = {
-    "linguistic": 0.34,
-    "technical_forensics": 0.33,
-    "threat_intelligence": 0.33
+    "linguistic": 0.60,
+    "technical_validation": 0.20,
+    "threat_intelligence": 0.20
 }
 
 # Weighted aggregation with confidence adjustment
@@ -345,8 +319,38 @@ uncertainty = 1 - (sum(confidences) / len(confidences))
 **Explainability Generation:**
 1. Identify top contributing agents (by weighted risk contribution)
 2. Extract key evidence from each agent
-3. Synthesize narrative explaining the decision
+3. Synthesize narrative explaining the decision using LLM (Groq Llama 3.3 70B)
 4. Generate actionable recommendations
+
+**Automated Actions Framework:**
+
+The coordination agent generates recommended actions based on risk level and confidence:
+
+| Risk Level | Confidence | Actions |
+|------------|-----------|---------|
+| **CRITICAL** (≥0.90) + High Conf (≥0.85) | High | • Quarantine (auto-execute)<br>• Block sender (requires approval)<br>• Alert security team (auto-execute)<br>• Audit log (auto-execute) |
+| **HIGH** (0.70-0.89) | Medium-High | • Quarantine (auto-execute)<br>• Tag as "SUSPECTED_PHISHING"<br>• Audit log |
+| **MEDIUM** (0.40-0.69) | Medium | • Tag as "REVIEW_REQUIRED"<br>• Audit log |
+| **LOW** (<0.40) | Any | • No action required<br>• Optional: Light audit log |
+
+**Action Types Supported:**
+- ✅ **QUARANTINE**: Move email to quarantine folder (n8n auto-execute)
+- ✅ **BLOCK_SENDER**: Add sender email/domain to blocklist (requires admin approval for domains)
+- ✅ **ALERT**: Send notifications via email/Slack/webhook (n8n auto-execute)
+- ✅ **TAG**: Apply Gmail label or Exchange category (n8n auto-execute)
+- ✅ **LOG**: Write to audit database/file (n8n auto-execute)
+- ❌ **DELETE**: Removed - too risky for false positives
+
+**Action Schema:**
+```python
+class RecommendedAction(BaseModel):
+    action_type: str  # QUARANTINE, BLOCK_SENDER, ALERT, TAG, LOG, NO_ACTION
+    priority: str  # CRITICAL, HIGH, MEDIUM, LOW
+    confidence: float  # 0-1 confidence in this action
+    parameters: dict  # Action-specific parameters (e.g., quarantine reason, alert channels)
+    requires_approval: bool  # True if human approval needed before execution
+    reasoning: str  # Human-readable explanation of why this action is recommended
+```
 
 **Output:**
 ```python
@@ -370,62 +374,137 @@ uncertainty = 1 - (sum(confidences) / len(confidences))
             "risk_score": 0.85,
             "confidence": 0.92
         },
-        # ... other agents
+        {
+            "agent": "technical_validation",
+            "weighted_contribution": 0.19,
+            "risk_score": 0.75,
+            "confidence": 0.88
+        }
     ],
     "top_indicators": [
         {
             "source": "threat_intelligence",
-            "type": "campaign_match",
+            "type": "malicious_url",
             "severity": "HIGH",
-            "description": "Matched known banking trojan campaign"
+            "description": "URL flagged as MALWARE by Google Safe Browsing",
+            "evidence": "http://malicious-site.com flagged with 0.95 confidence"
         },
         {
-            "source": "technical_forensics",
-            "type": "spf_failure",
+            "source": "technical_validation",
+            "type": "new_domain",
             "severity": "HIGH",
-            "description": "SPF validation failed"
+            "description": "Domain registered only 15 days ago",
+            "evidence": "Domain age: 15 days (threshold: 30 days for phishing risk)"
         },
         {
             "source": "linguistic",
-            "type": "urgency",
+            "type": "phishing_detection",
             "severity": "HIGH",
-            "description": "Urgent action manipulation detected"
+            "description": "BERT model detected phishing content",
+            "evidence": "Model confidence: 0.9998 (99.98% phishing probability)"
         }
     ],
     "explanation": {
-        "summary": "This email exhibits multiple high-risk indicators consistent with a phishing attack. The message matches a known banking trojan campaign (APT-2024-1337) and fails critical authentication checks (SPF). The content employs urgency manipulation tactics commonly used in social engineering.",
+        "summary": "This email exhibits multiple high-risk indicators consistent with a phishing attack. The primary concerns are: (1) URL flagged as malware by Google Safe Browsing, (2) domain registered only 15 days ago, and (3) ML model detected phishing language patterns with 99.98% confidence.",
         
         "key_findings": [
-            "Email matched known threat campaign with 89% confidence",
-            "Failed SPF authentication - likely spoofed sender",
-            "Urgent language detected: 'Act now before midnight'",
-            "Sender domain registered only 15 days ago",
-            "First-time communication from this sender"
+            "🚨 CRITICAL: URL matches known malware database (Google Safe Browsing)",
+            "⚠️ HIGH: Sender domain registered only 15 days ago",
+            "⚠️ HIGH: BERT model detected phishing content (99.98% confidence)",
+            "⚠️ MEDIUM: Urgent language manipulation tactics detected",
+            "ℹ️ INFO: Sender IP has moderate abuse score (AbuseIPDB: 45%)"
         ],
         
         "risk_breakdown": {
-            "threat_intelligence": "HIGH - Active campaign match",
-            "technical": "HIGH - Authentication failures",
-            "linguistic": "HIGH - Manipulation tactics present",
-            "behavioral": "MEDIUM - Unusual communication pattern"
-        }
+            "threat_intelligence": "HIGH (0.88) - Known malicious URL detected",
+            "linguistic": "HIGH (0.85) - ML model confirms phishing patterns",
+            "technical_validation": "HIGH (0.75) - Suspiciously new domain"
+        },
+        
+        "narrative": "The Threat Intelligence Agent identified a URL in the email body that matches Google Safe Browsing's malware database with high confidence (0.95). This alone is a strong indicator of malicious intent. Additionally, the Technical Validation Agent discovered that the sender's domain was registered only 15 days ago, which is a common characteristic of phishing campaigns that use disposable domains. Finally, the Linguistic Analysis Agent's fine-tuned BERT model detected phishing language patterns with 99.98% accuracy, including urgency manipulation and credential harvesting indicators. The convergence of all three agents pointing to malicious activity provides high confidence (0.85) in the HIGH risk classification."
     },
-    "recommendations": [
-        "🚨 DO NOT click any links or open attachments",
+    "recommended_actions": [
+        {
+            "action_type": "QUARANTINE",
+            "priority": "CRITICAL",
+            "confidence": 0.85,
+            "parameters": {
+                "reason": "High-confidence phishing detection with known malware URL",
+                "folder": "Quarantine/Phishing"
+            },
+            "requires_approval": false,
+            "reasoning": "Email contains known malware URL and exhibits multiple phishing indicators. Immediate quarantine protects user from potential harm."
+        },
+        {
+            "action_type": "BLOCK_SENDER",
+            "priority": "HIGH",
+            "confidence": 0.78,
+            "parameters": {
+                "scope": "domain",
+                "sender_domain": "suspicious-newsite.com",
+                "block_duration": "permanent"
+            },
+            "requires_approval": true,
+            "reasoning": "Sender domain shows malicious patterns (new domain + malware distribution). Recommend blocking entire domain, but requires admin approval due to impact."
+        },
+        {
+            "action_type": "ALERT",
+            "priority": "CRITICAL",
+            "confidence": 0.85,
+            "parameters": {
+                "channels": ["email", "slack"],
+                "recipients": ["security-team@company.com"],
+                "message": "High-confidence phishing email detected with known malware URL",
+                "include_analysis": true
+            },
+            "requires_approval": false,
+            "reasoning": "Security team must be notified immediately about active phishing attempt with malware distribution."
+        },
+        {
+            "action_type": "TAG",
+            "priority": "HIGH",
+            "confidence": 0.85,
+            "parameters": {
+                "label": "PHISHING_DETECTED",
+                "color": "red"
+            },
+            "requires_approval": false,
+            "reasoning": "Visual indicator for any user who might encounter this email in quarantine."
+        },
+        {
+            "action_type": "LOG",
+            "priority": "MEDIUM",
+            "confidence": 0.85,
+            "parameters": {
+                "retention_days": 365,
+                "include_full_analysis": true,
+                "log_level": "security_incident"
+            },
+            "requires_approval": false,
+            "reasoning": "Comprehensive audit trail for security review and potential incident response."
+        }
+    ],
+    "user_recommendations": [
+        "🚨 DO NOT click any links or open attachments in this email",
         "🚨 DO NOT provide any credentials or sensitive information",
-        "✅ Report this email to security team immediately",
-        "✅ Verify sender authenticity through separate channel",
-        "✅ Delete this email after reporting",
-        "ℹ️ Similar emails may target other employees"
+        "✅ This email has been automatically quarantined for your protection",
+        "✅ Security team has been notified and is investigating",
+        "ℹ️ If you believe this is a false positive, contact security team for review"
     ],
     "metadata": {
-        "analysis_timestamp": "2024-11-06T10:23:45Z",
-        "total_processing_time_ms": 1369,
-        "system_version": "3.0.0",
+        "analysis_timestamp": "2025-11-09T10:23:45Z",
+        "total_processing_time_ms": 1456,
+        "system_version": "3.1.0",
+        "agents_used": ["linguistic", "technical_validation", "threat_intelligence"],
         "models_used": [
-            "deberta-v3-phishing-finetuned",
-            "isolation-forest-behavioral",
-            "threat-correlation-v2"
+            "dima806/phishing-email-detection (BERT)",
+            "all-MiniLM-L6-v2 (embeddings)",
+            "dslim/bert-base-NER"
+        ],
+        "external_apis_called": [
+            "Google Safe Browsing",
+            "AbuseIPDB",
+            "WHOIS"
         ]
     }
 }
@@ -462,8 +541,9 @@ app/
 │   ├── helper_preprocessing.py        # ✅ IMPLEMENTED - Email preprocessing
 │   ├── helper_pydantic.py             # ✅ IMPLEMENTED - Data models
 │   ├── helper_constant.py             # ✅ IMPLEMENTED - Constants & configs
-│   ├── helper_aggregation.py          # 🔲 TODO - Risk aggregation (3-agent)
-│   └── helper_explainability.py       # 🔲 TODO - Explanation generation
+│   ├── helper_aggregation.py          # 🔲 TODO - Risk aggregation (3-agent weighted)
+│   ├── helper_explainability.py       # 🔲 TODO - Explanation generation (LLM-based)
+│   └── helper_actions.py              # 🔲 TODO - Action recommendation logic
 │
 └── Services/
     ├── __init__.py
@@ -481,13 +561,241 @@ app/
 1. **Email Input** → Coordination Agent receives email from n8n
 2. **Parallel Analysis** → Coordination Agent dispatches to 3 specialized agents
    - Linguistic Agent (ML-based semantic analysis)
-   - Technical Forensics Agent (infrastructure validation)
+   - Technical Validation Agent (domain age validation)
    - Threat Intelligence Agent (threat feed correlation)
 3. **Agent Processing** → Each agent performs specialized analysis
 4. **Result Aggregation** → Coordination Agent collects all results
-5. **Risk Calculation** → Weighted aggregation (0.34, 0.33, 0.33) with confidence adjustment
-6. **Explanation Generation** → Synthesize human-readable report
-7. **Output** → Return comprehensive analysis to n8n workflow
+5. **Risk Calculation** → Weighted aggregation (60-20-20) with confidence adjustment
+6. **Explanation Generation** → Synthesize human-readable report using LLM
+7. **Action Recommendation** → Generate automated actions based on risk/confidence
+8. **Output** → Return comprehensive analysis to n8n workflow
+9. **n8n Action Execution** → n8n processes recommended actions:
+   - Auto-execute: QUARANTINE, ALERT, TAG, LOG (no approval needed)
+   - Approval flow: BLOCK_SENDER (admin approval via Slack/email)
+   - Audit trail: All actions logged to database
+
+## n8n Integration & Action Execution
+
+**n8n Workflow Integration:**
+
+```javascript
+// Example n8n node: Process Coordination Agent Response
+const coordinationResult = $json.coordination;
+const actions = $json.recommended_actions;
+
+// Initialize action execution results
+const executionResults = [];
+
+for (const action of actions) {
+  if (action.requires_approval) {
+    // Send to admin approval workflow
+    const approvalRequest = {
+      action: action.action_type,
+      priority: action.priority,
+      reasoning: action.reasoning,
+      confidence: action.confidence,
+      parameters: action.parameters,
+      timestamp: new Date().toISOString()
+    };
+    
+    // Post to Slack for admin approval
+    await $http.post('https://hooks.slack.com/services/YOUR_WEBHOOK', {
+      text: `⚠️ Action Approval Required: ${action.action_type}`,
+      blocks: [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `*Priority:* ${action.priority}\n*Confidence:* ${(action.confidence * 100).toFixed(1)}%\n*Reasoning:* ${action.reasoning}`
+          }
+        },
+        {
+          type: 'actions',
+          elements: [
+            { type: 'button', text: { type: 'plain_text', text: 'Approve' }, value: 'approve', style: 'primary' },
+            { type: 'button', text: { type: 'plain_text', text: 'Reject' }, value: 'reject', style: 'danger' }
+          ]
+        }
+      ]
+    });
+    
+    executionResults.push({ action: action.action_type, status: 'pending_approval' });
+    
+  } else {
+    // Auto-execute action
+    let result;
+    
+    switch (action.action_type) {
+      case 'QUARANTINE':
+        // Move email to quarantine folder
+        result = await $gmail.moveMessage({
+          messageId: $json.email_id,
+          destinationFolder: action.parameters.folder || 'Quarantine'
+        });
+        executionResults.push({ action: 'QUARANTINE', status: 'executed', result });
+        break;
+        
+      case 'ALERT':
+        // Send alerts via configured channels
+        const channels = action.parameters.channels || ['email'];
+        
+        if (channels.includes('slack')) {
+          await $http.post('https://hooks.slack.com/services/YOUR_WEBHOOK', {
+            text: `🚨 Security Alert: ${action.parameters.message}`,
+            attachments: action.parameters.include_analysis ? [coordinationResult] : []
+          });
+        }
+        
+        if (channels.includes('email')) {
+          await $email.send({
+            to: action.parameters.recipients,
+            subject: `[Security Alert] ${action.priority}: ${action.parameters.message}`,
+            body: JSON.stringify(coordinationResult, null, 2)
+          });
+        }
+        
+        executionResults.push({ action: 'ALERT', status: 'executed', channels });
+        break;
+        
+      case 'TAG':
+        // Apply Gmail label
+        result = await $gmail.addLabel({
+          messageId: $json.email_id,
+          label: action.parameters.label
+        });
+        executionResults.push({ action: 'TAG', status: 'executed', label: action.parameters.label });
+        break;
+        
+      case 'LOG':
+        // Write to audit database
+        await $postgres.insert({
+          table: 'security_audit_log',
+          data: {
+            timestamp: new Date().toISOString(),
+            email_id: $json.email_id,
+            risk_level: coordinationResult.risk_level,
+            risk_score: coordinationResult.final_risk_score,
+            confidence: coordinationResult.confidence,
+            actions_taken: JSON.stringify(actions),
+            full_analysis: JSON.stringify(coordinationResult),
+            retention_days: action.parameters.retention_days || 90
+          }
+        });
+        executionResults.push({ action: 'LOG', status: 'executed' });
+        break;
+        
+      case 'NO_ACTION':
+        executionResults.push({ action: 'NO_ACTION', status: 'skipped' });
+        break;
+    }
+  }
+}
+
+return {
+  coordination: coordinationResult,
+  actions_executed: executionResults,
+  processing_complete: true
+};
+```
+
+**Action Approval Workflow (Slack Integration):**
+
+```javascript
+// Example n8n node: Handle Slack Approval Response
+const approvalResponse = $json.actions[0].value; // 'approve' or 'reject'
+const actionRequest = $json.original_request;
+
+if (approvalResponse === 'approve') {
+  switch (actionRequest.action) {
+    case 'BLOCK_SENDER':
+      // Add sender to Gmail filter/blocklist
+      if (actionRequest.parameters.scope === 'domain') {
+        await $gmail.createFilter({
+          from: `*@${actionRequest.parameters.sender_domain}`,
+          action: 'DELETE' // or 'TRASH' or 'SPAM'
+        });
+      } else {
+        await $gmail.createFilter({
+          from: actionRequest.parameters.sender_email,
+          action: 'DELETE'
+        });
+      }
+      
+      // Log the action
+      await $postgres.insert({
+        table: 'security_actions',
+        data: {
+          action: 'BLOCK_SENDER',
+          approved_by: $json.user.id,
+          approved_at: new Date().toISOString(),
+          parameters: actionRequest.parameters
+        }
+      });
+      
+      // Confirm in Slack
+      await $http.post('https://hooks.slack.com/services/YOUR_WEBHOOK', {
+        text: `✅ BLOCK_SENDER action executed: ${actionRequest.parameters.sender_domain || actionRequest.parameters.sender_email}`
+      });
+      break;
+  }
+} else {
+  // Log rejection
+  await $postgres.insert({
+    table: 'security_actions',
+    data: {
+      action: actionRequest.action,
+      status: 'rejected',
+      rejected_by: $json.user.id,
+      rejected_at: new Date().toISOString(),
+      rejection_reason: $json.rejection_reason || 'Manual review'
+    }
+  });
+}
+```
+
+**Database Schema for Audit Logging:**
+
+```sql
+-- security_audit_log table
+CREATE TABLE security_audit_log (
+    id SERIAL PRIMARY KEY,
+    timestamp TIMESTAMPTZ NOT NULL,
+    email_id VARCHAR(255) NOT NULL,
+    sender VARCHAR(255),
+    subject TEXT,
+    risk_level VARCHAR(20) NOT NULL, -- HIGH, MEDIUM, LOW
+    risk_score DECIMAL(3,2) NOT NULL, -- 0.00-1.00
+    confidence DECIMAL(3,2) NOT NULL,
+    actions_taken JSONB,
+    full_analysis JSONB,
+    retention_days INTEGER DEFAULT 90,
+    expires_at TIMESTAMPTZ GENERATED ALWAYS AS (timestamp + (retention_days || ' days')::INTERVAL) STORED,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- security_actions table
+CREATE TABLE security_actions (
+    id SERIAL PRIMARY KEY,
+    action VARCHAR(50) NOT NULL, -- QUARANTINE, BLOCK_SENDER, etc.
+    status VARCHAR(20) NOT NULL, -- executed, pending, rejected
+    priority VARCHAR(20),
+    confidence DECIMAL(3,2),
+    parameters JSONB,
+    approved_by VARCHAR(100),
+    approved_at TIMESTAMPTZ,
+    rejected_by VARCHAR(100),
+    rejected_at TIMESTAMPTZ,
+    rejection_reason TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Indexes for performance
+CREATE INDEX idx_audit_log_risk_level ON security_audit_log(risk_level);
+CREATE INDEX idx_audit_log_timestamp ON security_audit_log(timestamp);
+CREATE INDEX idx_audit_log_expires_at ON security_audit_log(expires_at);
+CREATE INDEX idx_actions_status ON security_actions(status);
+CREATE INDEX idx_actions_created_at ON security_actions(created_at);
+```
 
 ## Performance Targets
 
@@ -504,23 +812,47 @@ app/
 ## Configuration
 
 ```python
-# config.py - Research Configuration (3-agent system)
+# config.py - Research Configuration (3-agent system with automated actions)
 
 AGENT_WEIGHTS = {
-    "linguistic": 0.34,
-    "technical_forensics": 0.33,
-    "threat_intelligence": 0.33
+    "linguistic": 0.60,  # Primary ML-based defense
+    "technical_validation": 0.20,  # Domain age support
+    "threat_intelligence": 0.20  # Known threats support
 }
 
 RISK_THRESHOLDS = {
+    "CRITICAL": 0.90,  # Extreme risk with very high confidence
     "HIGH": 0.70,
     "MEDIUM": 0.40,
     "LOW": 0.0
 }
 
+# Action configuration
+ACTION_CONFIG = {
+    "auto_execute_threshold": {
+        "QUARANTINE": 0.70,  # Auto-quarantine at HIGH risk
+        "ALERT": 0.70,       # Auto-alert at HIGH risk
+        "TAG": 0.40,         # Auto-tag at MEDIUM risk
+        "LOG": 0.0           # Always log
+    },
+    "approval_required": {
+        "BLOCK_SENDER": True,  # Always require approval
+        "DELETE": False         # Disabled (too risky)
+    },
+    "confidence_threshold": 0.85,  # Minimum confidence for CRITICAL actions
+    "alert_channels": ["email", "slack"],
+    "quarantine_folder": "Quarantine/Phishing",
+    "audit_retention_days": {
+        "CRITICAL": 365,
+        "HIGH": 180,
+        "MEDIUM": 90,
+        "LOW": 30
+    }
+}
+
 MODELS = {
     "linguistic": {
-        "phishing": "dima806/phishing-email-detection",  # Fine-tuned BERT
+        "phishing": "dima806/phishing-email-detection",  # Fine-tuned BERT (99.98%)
         "embeddings": "all-MiniLM-L6-v2",  # SentenceTransformer
         "ner": "dslim/bert-base-NER"  # Named Entity Recognition
     }
@@ -528,31 +860,24 @@ MODELS = {
 
 EXTERNAL_APIS = {
     # Threat Intelligence Agent only
-    "virustotal": {
+    "google_safe_browsing": {
         "enabled": True,
-        "api_key": "env:VIRUSTOTAL_API_KEY",
-        "rate_limit": 500,  # per day for free tier
-        "requests_per_minute": 4
+        "api_key": "env:GOOGLE_SAFE_BROWSING_API_KEY",
+        "rate_limit": 10000,  # per day
+        "timeout": 5
     },
-    "phishtank": {
+    "abuseipdb": {
         "enabled": True,
-        "api_key": "env:PHISHTANK_API_KEY",
-        "rate_limit": None  # unlimited for free tier
+        "api_key": "env:ABUSEIPDB_API_KEY",
+        "rate_limit": 1000,  # per day
+        "timeout": 5
     },
-    "alienvault": {
-        "enabled": True,
-        "api_key": "env:ALIENVAULT_API_KEY",
-        "rate_limit": 1000  # per hour
-    },
+    # Excluded: VirusTotal (4 req/min too restrictive for evaluation)
     
-    # Technical Forensics Agent - no API keys needed (DNS/WHOIS are free)
+    # Technical Validation Agent - no API keys needed
     "whois": {
         "enabled": True,
         "timeout": 5
-    },
-    "dns": {
-        "enabled": True,
-        "timeout": 3
     }
 }
 
@@ -561,7 +886,21 @@ LLM_CONFIG = {
     "model": "llama-3.3-70b-versatile",
     "api_key": "env:GROQ_API_KEY",
     "rate_limit": 30,  # per minute (free tier)
-    "temperature": 0.1  # low for consistent analysis
+    "temperature": 0.1,  # low for consistent analysis
+    "max_tokens": 2000,  # for explanation generation
+    "use_for_explainability": True
+}
+
+N8N_CONFIG = {
+    "webhook_url": "env:N8N_WEBHOOK_URL",
+    "approval_webhook": "env:N8N_APPROVAL_WEBHOOK",
+    "slack_webhook": "env:SLACK_WEBHOOK_URL",
+    "audit_database": {
+        "host": "env:POSTGRES_HOST",
+        "database": "env:POSTGRES_DB",
+        "user": "env:POSTGRES_USER",
+        "password": "env:POSTGRES_PASSWORD"
+    }
 }
 ```
 
@@ -569,22 +908,29 @@ LLM_CONFIG = {
 
 1. ✅ Create architecture document (this file)
 2. ✅ Implement Linguistic Agent (pure ML-based)
-3. 🔲 Implement Technical Forensics Agent (infrastructure validation)
-4. 🔲 Implement Threat Intelligence Agent (threat feed correlation)
-5. 🔲 Implement Coordination Agent (3-agent aggregation)
-6. 🔲 Add external service integrations
-7. 🔲 Create comprehensive test suite
+3. ✅ Implement Technical Validation Agent (domain age WHOIS)
+4. ✅ Implement Threat Intelligence Agent (Google Safe Browsing + AbuseIPDB)
+5. 🔲 Implement Coordination Agent (3-agent aggregation + actions)
+   - Risk aggregation with 60-20-20 weights
+   - Confidence-adjusted scoring
+   - LLM-based explanation generation
+   - Automated action recommendations (quarantine, block, alert, tag, log)
+6. 🔲 Add external service integrations (complete API error handling)
+7. 🔲 Create comprehensive test suite (end-to-end coordination testing)
 8. 🔲 Add monitoring and metrics
-9. 🔲 Deploy and validate
+9. 🔲 Deploy and validate with n8n workflow integration
 
 ---
 
-**Version:** 3.1.0 (Revised for research focus)
-**Last Updated:** November 8, 2024  
-**Status:** Architecture Updated - Linguistic Agent Complete, 2 Agents Remaining
-**Changes from v3.0.0:**
-- Removed Behavioral Pattern Agent (enterprise-only, requires historical data)
-- Adjusted to 3-agent system with weights: 0.34, 0.33, 0.33
-- Clarified separation between Technical Forensics (infrastructure) and Threat Intelligence (threat feeds)
-- Updated to reflect pure ML-based Linguistic Agent implementation
-- Added free-tier API constraints for research setting
+**Version:** 3.2.0 (Revised for research focus with automated actions)
+**Last Updated:** November 9, 2025  
+**Status:** 3 Agents Complete, Coordination Agent Ready for Implementation
+**Changes from v3.1.0:**
+- Added automated action framework (QUARANTINE, BLOCK_SENDER, ALERT, TAG, LOG)
+- Removed auto-delete action (too risky for false positives)
+- Added action approval workflow (critical actions require admin approval)
+- Enhanced explainability with LLM-generated narratives
+- Updated coordination agent output schema with recommended_actions array
+- Added helper_actions.py module for action recommendation logic
+- Defined risk-based action thresholds (CRITICAL ≥0.90, HIGH ≥0.70, etc.)
+- Integrated n8n workflow automation capabilities
