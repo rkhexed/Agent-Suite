@@ -35,3 +35,29 @@ class AnalysisResult(BaseModel):
     recommendations: List[str]
     metadata: Dict[str, Any]
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+# Technical Validation Models (Lightweight)
+class DomainValidation(BaseModel):
+    """Lightweight domain validation result focusing on age"""
+    domain: str
+    age_days: Optional[int] = None
+    registration_date: Optional[datetime] = None
+    is_new_domain: bool = False  # < 30 days
+    risk_score: float = Field(ge=0.0, le=1.0, default=0.0)
+    whois_available: bool = True
+
+class TechnicalValidationResult(BaseModel):
+    """Lightweight technical validation result"""
+    risk_score: float = Field(ge=0.0, le=1.0)
+    confidence: float = Field(ge=0.0, le=1.0)
+    domain_validation: DomainValidation
+    url_count: int = 0
+    has_external_links: bool = False
+    processing_time_ms: int
+
+class TechnicalValidationInput(BaseModel):
+    """Input schema for Technical Validation Tool"""
+    email_data: Dict[str, Any] = Field(
+        ..., 
+        description="Email data with sender and body for technical validation"
+    )
