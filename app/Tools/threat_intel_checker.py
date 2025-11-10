@@ -20,10 +20,8 @@ logger = logging.getLogger(__name__)
 class ThreatIntelligenceChecker:
     """
     Lightweight threat intelligence checker using:
-    - Google Safe Browsing API (10,000 req/day - FREE)
-    - AbuseIPDB API (1,000 req/day - FREE)
-    
-    NO VirusTotal (4 req/min too restrictive for evaluation)
+    - Google Safe Browsing API
+    - AbuseIPDB API
     """
     
     def __init__(self):
