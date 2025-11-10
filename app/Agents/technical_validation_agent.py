@@ -9,7 +9,7 @@ import logging
 import json
 
 from app.Tools.technical_validation import TechnicalValidationTool
-from app.LLM.llm import get_groq_llama_70b
+from app.LLM.llm import get_gemini_flash
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -30,19 +30,36 @@ class TechnicalValidationCrew(BaseCybersecurityCrew):
         """Create specialized agent for domain validation"""
         
         domain_validator = Agent(
-            role="Email Domain Validation Specialist",
-            goal="Validate sender domain authenticity and age to detect phishing attempts",
-            backstory="""You are an expert in domain validation and WHOIS analysis.
-            Your primary focus is checking if sender domains are suspiciously new 
-            (registered less than 30 days ago), which is a strong indicator of 
-            phishing attempts. You use WHOIS database lookups to determine domain 
-            registration dates and calculate risk scores based on domain age.
+            role="Infrastructure Security Analyst",
+            goal="Assess email sender infrastructure for signs of phishing campaigns using domain age analysis",
+            backstory="""You are a cybersecurity analyst specializing in email infrastructure analysis.
+            You analyze sender domains like an experienced SOC analyst would:
             
-            You understand that legitimate businesses use established domains, while 
-            phishers frequently register new domains for their campaigns. You focus 
-            on domain age as the primary technical signal for email authenticity.""",
+            1. DOMAIN AGE ASSESSMENT: You check WHOIS records to determine domain registration date
+               - Phishing campaigns often use newly registered domains (< 30 days old)
+               - Legitimate businesses use established domains (typically years old)
+               - You understand that domain age alone isn't conclusive but is a strong signal
+            
+            2. DATA QUALITY INDICATORS: You document WHOIS lookup reliability
+               - WHOIS data availability (some registrars protect privacy)
+               - Registration date accuracy (some show last update, not creation)
+               - Domain registrar reputation
+            
+            3. CONTEXTUAL REASONING: You explain infrastructure risk patterns
+               - WHY new domains indicate phishing risk
+               - How domain age correlates with attack campaigns
+               - When established domains might still be compromised
+            
+            Your assessments include:
+            - CERTAINTY LEVEL based on WHOIS data quality (DEFINITIVE for clear WHOIS, HIGH for partial data, LOW for protected/unavailable)
+            - ANALYSIS REASONING explaining domain age significance and risk patterns
+            - EVIDENCE QUALITY documenting WHOIS source, data completeness, lookup success/failure
+            - LIMITATIONS noting you cannot assess: content safety, sender authenticity, IP reputation, link destinations
+            
+            You DO NOT analyze email content, URLs, or IPs - that's for other specialized agents.
+            You focus purely on sender domain infrastructure.""",
             tools=[self.technical_tool],
-            llm=get_groq_llama_70b(),
+            llm=get_gemini_flash(),
             verbose=True,
             allow_delegation=False
         )
@@ -53,26 +70,48 @@ class TechnicalValidationCrew(BaseCybersecurityCrew):
         """Create task for technical validation"""
         
         validation_task = Task(
-            description="""Perform technical validation focusing on domain age analysis.
-            Use the Technical Email Validation Tool to:
+            description="""Perform infrastructure security analysis of sender domain with cybersecurity analyst expertise.
+            Use the Technical Email Validation Tool to analyze domain infrastructure, then provide detailed reasoning:
             
-            1. Check sender domain age via WHOIS lookup
-            2. Identify if domain is suspiciously new (< 30 days old)
-            3. Calculate risk score based on domain age
-            4. Count URLs and detect external links in email body
+            ANALYSIS APPROACH (think like a SOC analyst):
+            1. **WHOIS Domain Age Check**: Retrieve domain registration date
+               - Calculate domain age in days
+               - Flag if < 30 days old (high phishing risk)
+               - Flag if < 90 days old (moderate phishing risk)
+               - Note: Established domains (> 1 year) are generally lower risk
+            
+            2. **Data Quality Assessment**: Document WHOIS lookup reliability
+               - Was WHOIS data available? (Some registrars use privacy protection)
+               - Is registration date accurate? (Some show update date, not creation)
+               - What registrar was used? (Some are known for phishing abuse)
+            
+            3. **Infrastructure Risk Patterns**: Explain phishing campaign indicators
+               - New domains: Phishers register fresh domains for each campaign
+               - Domain parking: Recently registered but not yet configured properly
+               - Bulk registration: Multiple similar domains registered together
             
             Email Data: {email_data}
             Metadata: {metadata}
             
-            Focus on domain age as the primary technical indicator.""",
+            REQUIRED OUTPUT FORMAT (provide ALL fields):
+            - risk_score: Float 0.0-1.0 (1.0 for <7 days, 0.8 for <30 days, 0.5 for <90 days, 0.2 for >1 year)
+            - certainty_level: DEFINITIVE (clear WHOIS with registration date) / HIGH (WHOIS available, some ambiguity) / MEDIUM (partial WHOIS) / LOW (privacy protected) / INCONCLUSIVE (WHOIS unavailable)
+            - analysis_reasoning: "Domain is X days old, registered on DATE. [Explain risk pattern and significance]"
+            - evidence_quality: "WHOIS lookup via [source]. Registration date: [DATE]. Data completeness: [FULL/PARTIAL/PROTECTED]. Registrar: [NAME]."
+            - limitations: "Cannot assess: email content safety, sender IP reputation, link/attachment threats, whether domain is compromised. Infrastructure analysis only."
+            - findings: List of infrastructure indicators (domain age, WHOIS availability, registration patterns)
+            - recommendations: Actionable advice based on infrastructure risk""",
             agent=self.agents[0],
-            expected_output="""A structured validation report containing:
-            - Domain age in days
-            - Domain registration date
-            - Is new domain flag (< 30 days)
-            - Risk score based on domain age
-            - URL count and external link detection
-            - Confidence metrics"""
+            expected_output="""JSON object with complete infrastructure security assessment:
+            {
+                "risk_score": 0.X,
+                "certainty_level": "DEFINITIVE/HIGH/MEDIUM/LOW/INCONCLUSIVE",
+                "analysis_reasoning": "Detailed explanation of domain age significance and infrastructure risk patterns",
+                "evidence_quality": "WHOIS data source, completeness, and reliability assessment",
+                "limitations": "Clear statement of what this agent cannot assess",
+                "findings": [list of specific infrastructure indicators],
+                "recommendations": [actionable security recommendations]
+            }"""
         )
         
         return [validation_task]
@@ -85,18 +124,36 @@ class TechnicalValidationCrew(BaseCybersecurityCrew):
         })
     
     def _parse_crew_result(self, result: Any, request: AgentRequest, processing_time: float) -> AgentResponse:
-        """Parse CrewAI result into standardized response"""
+        """Parse CrewAI result into standardized response with infrastructure analyst reasoning"""
         
         findings = []
         recommendations = []
-        confidence_score = 0.0
+        risk_score = 0.0
+        certainty_level = "INCONCLUSIVE"
+        analysis_reasoning = "Infrastructure analysis failed to produce structured output"
+        evidence_quality = "No WHOIS data collected"
+        limitations = "Unable to perform infrastructure analysis"
         
         try:
+            import json
             validation_output = None
             
-            # Extract JSON from CrewAI result
+            # Strategy 1: Extract JSON from agent output
             if hasattr(result, 'raw') and result.raw:
                 raw_str = str(result.raw)
+                
+                # Remove markdown code fences if present
+                if '```json' in raw_str:
+                    json_start = raw_str.find('```json') + 7
+                    json_end = raw_str.find('```', json_start)
+                    if json_end > json_start:
+                        raw_str = raw_str[json_start:json_end].strip()
+                elif '```' in raw_str:
+                    json_start = raw_str.find('```') + 3
+                    json_end = raw_str.find('```', json_start)
+                    if json_end > json_start:
+                        raw_str = raw_str[json_start:json_end].strip()
+                
                 json_start = raw_str.find('{')
                 json_end = raw_str.rfind('}') + 1
                 
@@ -104,82 +161,105 @@ class TechnicalValidationCrew(BaseCybersecurityCrew):
                     try:
                         potential_json = raw_str[json_start:json_end]
                         validation_output = json.loads(potential_json)
-                        logger.info(f"Extracted validation output from raw (risk_score: {validation_output.get('risk_score', 'N/A')})")
+                        logger.info(f"✅ Extracted JSON output from agent")
                     except json.JSONDecodeError as e:
-                        logger.warning(f"Failed to parse JSON from raw output: {e}")
+                        logger.warning(f"Failed to parse JSON: {e}")
             
-            # Process validation results
+            # Strategy 2: Try tasks_output
+            if not validation_output and hasattr(result, 'tasks_output') and result.tasks_output:
+                for task_output in result.tasks_output:
+                    if hasattr(task_output, 'raw') and task_output.raw:
+                        try:
+                            raw_str = str(task_output.raw)
+                            json_start = raw_str.find('{')
+                            json_end = raw_str.rfind('}') + 1
+                            if json_start >= 0 and json_end > json_start:
+                                validation_output = json.loads(raw_str[json_start:json_end])
+                                logger.info(f"✅ Extracted from tasks_output")
+                                break
+                        except Exception as e:
+                            continue
+            
+            # If we got structured output, extract all fields
             if validation_output and isinstance(validation_output, dict):
-                risk_score = validation_output.get('risk_score', 0.5)
-                confidence_score = validation_output.get('confidence', 0.5)
+                # Extract new confidence structure
+                certainty_level = validation_output.get("certainty_level", "MEDIUM")
+                analysis_reasoning = validation_output.get("analysis_reasoning", "No reasoning provided")
+                evidence_quality = validation_output.get("evidence_quality", "Evidence quality not documented")
+                limitations = validation_output.get("limitations", "Limitations not specified")
                 
-                # Domain validation findings
-                domain_val = validation_output.get('domain_validation', {})
-                if domain_val:
-                    is_new = domain_val.get('is_new_domain', False)
-                    age_days = domain_val.get('age_in_days', 'Unknown')
-                    domain_risk = domain_val.get('risk_score', 0.5)
-                    
-                    severity = "high" if domain_risk > 0.6 else "medium" if domain_risk > 0.3 else "low"
-                    
-                    findings.append({
-                        "type": "domain_age",
-                        "severity": severity,
-                        "confidence": confidence_score,
-                        "description": f"Domain age: {age_days} days {'(NEW DOMAIN - SUSPICIOUS)' if is_new else '(established)'}",
-                        "evidence": [f"Registration date: {domain_val.get('registration_date', 'Unknown')}"]
-                    })
-                    
-                    if is_new:
-                        recommendations.append("⚠️ Sender domain is very new (< 30 days) - high phishing risk")
+                # Extract risk score
+                risk_score = validation_output.get("risk_score", 0.5)
                 
-                # URL metrics findings
-                url_count = validation_output.get('url_count', 0)
-                has_external = validation_output.get('has_external_links', False)
+                # Extract findings
+                if "findings" in validation_output:
+                    raw_findings = validation_output["findings"]
+                    # Convert to list of dicts if they're strings
+                    if isinstance(raw_findings, list):
+                        findings = []
+                        for f in raw_findings:
+                            if isinstance(f, str):
+                                findings.append({"description": f})
+                            elif isinstance(f, dict):
+                                findings.append(f)
+                            else:
+                                findings.append({"description": str(f)})
+                    else:
+                        findings = [{"description": str(raw_findings)}]
+                else:
+                    # Fallback to old format parsing
+                    domain_val = validation_output.get('domain_validation', {})
+                    if domain_val:
+                        is_new = domain_val.get('is_new_domain', False)
+                        age_days = domain_val.get('age_in_days', 'Unknown')
+                        findings.append({
+                            "type": "domain_age",
+                            "description": f"Domain age: {age_days} days {'(NEW DOMAIN - SUSPICIOUS)' if is_new else '(established)'}",
+                            "evidence": f"Registration date: {domain_val.get('registration_date', 'Unknown')}"
+                        })
                 
-                if url_count > 0:
-                    findings.append({
-                        "type": "url_analysis",
-                        "severity": "medium" if has_external else "low",
-                        "confidence": 0.8,
-                        "description": f"Found {url_count} URL(s) in email",
-                        "evidence": [f"Contains external links: {has_external}"]
-                    })
-                    
-                    if has_external:
-                        recommendations.append("Email contains external links - verify before clicking")
+                # Extract recommendations
+                if "recommendations" in validation_output:
+                    recommendations = validation_output["recommendations"] if isinstance(validation_output["recommendations"], list) else [str(validation_output["recommendations"])]
                 
-                logger.info(f"✅ Successfully parsed validation with {len(findings)} findings")
+                logger.info(f"✅ Parsed technical validation: {certainty_level} certainty, {risk_score:.2f} risk, {len(findings)} findings")
                 
             else:
                 # Fallback
-                logger.warning("Could not extract validation output, using fallback")
+                logger.warning("Could not extract structured output, using fallback")
                 findings = [{
                     "type": "info",
-                    "severity": "info",
-                    "confidence": 0.5,
-                    "description": "Validation completed - see output for details",
-                    "evidence": [str(result)[:200]]
+                    "description": "Validation completed - structured output not available"
                 }]
-                confidence_score = 0.5
-                recommendations = ["Review full validation output"]
+                risk_score = 0.5
+                certainty_level = "LOW"
+                analysis_reasoning = "Agent did not produce expected structured output"
+                evidence_quality = "Unable to extract WHOIS data from agent output"
+                limitations = "Analysis produced narrative instead of structured data"
+                recommendations = ["Retry validation with explicit JSON formatting"]
             
         except Exception as e:
-            logger.error(f"Error parsing validation results: {str(e)}", exc_info=True)
+            logger.error(f"Error parsing technical validation: {str(e)}", exc_info=True)
             findings = [{
                 "type": "error",
-                "severity": "high",
-                "confidence": 1.0,
                 "description": f"Failed to process validation output: {str(e)}"
             }]
             recommendations = ["Manual review required due to processing error"]
-            confidence_score = 0.0
+            risk_score = 0.0
+            certainty_level = "INCONCLUSIVE"
+            analysis_reasoning = f"Parser error: {str(e)}"
+            evidence_quality = "No evidence - parsing failed"
+            limitations = "Complete analysis failure"
         
         return AgentResponse(
             agent_name=self.crew_name,
             request_id=request.request_id,
             status="success",
-            confidence_score=confidence_score,
+            risk_score=risk_score,
+            certainty_level=certainty_level,
+            analysis_reasoning=analysis_reasoning,
+            evidence_quality=evidence_quality,
+            limitations=limitations,
             findings=findings,
             recommendations=recommendations,
             processing_time=processing_time,

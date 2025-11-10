@@ -1,5 +1,5 @@
-from typing import Dict, Any, Optional, List
-from pydantic import BaseModel
+from typing import Dict, Any, Optional, List, Literal
+from pydantic import BaseModel, Field
 from crewai import Agent, Task, Crew, Process
 from crewai.tools import BaseTool
 import logging
@@ -20,11 +20,37 @@ class AgentRequest(BaseModel):
 
 
 class AgentResponse(BaseModel):
-    """Base response model for all cybersecurity agents"""
+    """
+    Base response model for all cybersecurity agents.
+    
+    New Confidence Mechanism (Cybersecurity Analyst Approach):
+    - certainty_level: DEFINITIVE (authoritative sources, 100% confirmed) / HIGH (strong indicators, multiple corroborating signals) / MEDIUM (some evidence, needs context) / LOW (weak signals, inconclusive) / INCONCLUSIVE (insufficient data)
+    - analysis_reasoning: WHY this assessment was made - specific evidence and logic
+    - evidence_quality: Which sources were used, how trustworthy they are, data completeness
+    - limitations: What couldn't be determined, missing context, caveats
+    """
     agent_name: str
     request_id: str
     status: str  # "success", "error", "warning"
-    confidence_score: float  # 0.0 to 1.0
+    
+    # Risk assessment
+    risk_score: float = Field(default=0.0, ge=0.0, le=1.0, description="Quantitative risk score from 0.0 to 1.0")
+    
+    # New confidence structure (cybersecurity analyst perspective)
+    certainty_level: Literal["DEFINITIVE", "HIGH", "MEDIUM", "LOW", "INCONCLUSIVE"] = Field(
+        description="Assessment certainty based on evidence quality and source authority"
+    )
+    analysis_reasoning: str = Field(
+        description="Detailed reasoning for this assessment - WHY this conclusion was reached"
+    )
+    evidence_quality: str = Field(
+        description="Quality and sources of evidence - which tools/models were used, how trustworthy"
+    )
+    limitations: str = Field(
+        description="What couldn't be determined, missing context, analysis caveats"
+    )
+    
+    # Results
     findings: List[Dict[str, Any]]
     recommendations: List[str]
     processing_time: float
@@ -168,7 +194,11 @@ class BaseCybersecurityCrew:
                 agent_name=self.crew_name,
                 request_id=request_data.get('request_id', 'unknown'),
                 status="error",
-                confidence_score=0.0,
+                risk_score=0.0,
+                certainty_level="INCONCLUSIVE",
+                analysis_reasoning=f"Crew execution failed: {str(e)}",
+                evidence_quality="No analysis performed due to error",
+                limitations="Agent error prevented analysis",
                 findings=[],
                 recommendations=[f"Crew error: {str(e)}"],
                 processing_time=(datetime.now() - start_time).total_seconds(),
@@ -210,7 +240,11 @@ class BaseCybersecurityCrew:
             agent_name=self.crew_name,
             request_id=request.request_id,
             status="success",
-            confidence_score=0.8,  # Default confidence
+            risk_score=0.5,
+            certainty_level="MEDIUM",
+            analysis_reasoning="Default analysis - override in subclass",
+            evidence_quality="No specific evidence sources configured",
+            limitations="Default implementation - specific agent should provide details",
             findings=[{"result": str(result)}],
             recommendations=["Review analysis results"],
             processing_time=processing_time,

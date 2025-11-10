@@ -28,7 +28,7 @@ class ThreatIntelligenceTool(BaseTool):
     
     name: str = "Threat Intelligence Tool"
     description: str = """Check URLs and IPs against threat intelligence databases.
-    Queries Google Safe Browsing (10K/day) and AbuseIPDB (1K/day) to detect
+    Queries Google Safe Browsing and AbuseIPDB to detect
     known malicious URLs, phishing sites, and suspicious IP addresses.
     Does NOT use VirusTotal to avoid rate limit issues during evaluation."""
     

@@ -6,7 +6,7 @@ import logging
 
 from app.Tools.email_analysis import EmailContentAnalysisTool
 from app.ML.semantic_analysis import SemanticAnalyzer
-from app.LLM.llm import get_groq_llama_70b  # Using Groq (FREE + FAST)
+from app.LLM.llm import get_gemini_flash  # Using Gemini Flash (1500 req/day FREE)
 from app.Helper.helper_pydantic import ThreatLevel, ThreatIndicator
 
 # Configure logging
@@ -30,13 +30,25 @@ class LinguisticAnalysisCrew(BaseCybersecurityCrew):
         
         linguistic_expert = Agent(
             role="ML-Enhanced Linguistic Analyst",
-            goal="Perform comprehensive linguistic analysis using advanced ML models",
-            backstory="""You are an expert in email security analysis, combining ML model insights 
-            with deep knowledge of social engineering and phishing tactics. You leverage transformer 
-            models and semantic analysis to detect subtle patterns and anomalies in email content. 
-            Your analysis is data-driven and based on model outputs rather than static rules.""",
+            goal="Perform comprehensive behavioral analysis of email content using ML models with cybersecurity analyst expertise",
+            backstory="""You are a cybersecurity analyst specializing in social engineering and phishing detection. 
+            You analyze email content like an experienced SOC analyst would:
+            
+            1. BEHAVIORAL ANALYSIS: You examine psychological manipulation tactics (urgency, fear, authority, scarcity)
+            2. ML MODEL INTERPRETATION: You interpret BERT phishing model predictions with understanding of model strengths/limitations
+            3. SOCIAL ENGINEERING TACTICS: You identify specific techniques (pretexting, baiting, quid pro quo, tailgating)
+            4. CONTEXTUAL REASONING: You explain WHY something is suspicious, not just that it is
+            
+            Your assessments include:
+            - CERTAINTY LEVEL based on evidence strength (DEFINITIVE for ML confidence >0.95, HIGH for >0.80, MEDIUM for >0.60, LOW for <0.60)
+            - ANALYSIS REASONING explaining specific tactics and behavioral indicators observed
+            - EVIDENCE QUALITY documenting BERT model performance and which features triggered detection
+            - LIMITATIONS noting what you cannot assess (sender authenticity, technical infrastructure, etc.)
+            
+            You DO NOT make claims about technical aspects (DNS, IP reputation, etc.) - that's for other agents.
+            You focus purely on content analysis and behavioral patterns.""",
             tools=[self.email_tool],
-            llm=get_groq_llama_70b(),
+            llm=get_gemini_flash(),
             verbose=True,
             allow_delegation=False
         )
@@ -47,26 +59,49 @@ class LinguisticAnalysisCrew(BaseCybersecurityCrew):
         """Create task for ML-powered linguistic analysis"""
         
         linguistic_analysis_task = Task(
-            description="""Perform comprehensive linguistic analysis using ML models and semantic analysis.
-            Use the EmailContentAnalysisTool to:
+            description="""Perform cybersecurity analyst-level behavioral analysis of email content.
+            Use the EmailContentAnalysisTool to analyze the email, then provide detailed reasoning:
             
-            1. Process email content through transformer models
-            2. Analyze semantic patterns and anomalies
-            3. Detect social engineering indicators
-            4. Identify manipulation tactics
-            5. Calculate threat metrics
+            ANALYSIS APPROACH (think like a SOC analyst):
+            1. **BERT Model Assessment**: Run the phishing detection model and interpret results
+               - What's the model prediction and confidence?
+               - Note: dima806/phishing-email-detection has 99.98% accuracy on test set
+               - Predictions >0.95 are highly reliable, 0.80-0.95 are strong, 0.60-0.80 need context
+            
+            2. **Social Engineering Tactics**: Identify specific manipulation techniques
+               - Urgency/time pressure ("within 24 hours", "immediately", "expires soon")
+               - Authority impersonation (claims to be from IT, bank, executive)
+               - Fear/consequences ("account suspended", "security breach", "legal action")
+               - Reward/scarcity ("limited offer", "exclusive access")
+            
+            3. **Behavioral Indicators**: Document psychological patterns
+               - Unusual requests (credentials, payments, downloads)
+               - Inconsistent tone (formal subject, informal body)
+               - Generic greetings vs. personalized content
+               - Suspicious language patterns
             
             Email Data: {email_data}
             Metadata: {metadata}
             
-            Focus on ML model outputs and confidence scores.""",
+            REQUIRED OUTPUT FORMAT (provide ALL fields):
+            - risk_score: Float 0.0-1.0 (use BERT model confidence as primary signal)
+            - certainty_level: DEFINITIVE (BERT >0.95) / HIGH (>0.80) / MEDIUM (>0.60) / LOW (<0.60) / INCONCLUSIVE (error)
+            - analysis_reasoning: Detailed explanation of WHY this assessment - cite specific tactics observed
+            - evidence_quality: "BERT phishing model (99.98% accuracy) confidence: X.XX. Features detected: [list]. Model limitations: [note]"
+            - limitations: "Cannot assess: sender IP reputation, domain authenticity, link destinations, attachment safety. Content analysis only."
+            - findings: List of specific indicators found (urgency, authority claims, suspicious requests)
+            - recommendations: Actionable advice based on behavioral analysis""",
             agent=self.agents[0],
-            expected_output="""A structured analysis report containing:
-            - ML model predictions and confidence scores
-            - Semantic analysis results
-            - Threat indicators with severity levels
-            - Evidence-based recommendations
-            - Threat level assessment with confidence metrics"""
+            expected_output="""JSON object with complete cybersecurity analyst assessment:
+            {
+                "risk_score": 0.X,
+                "certainty_level": "DEFINITIVE/HIGH/MEDIUM/LOW/INCONCLUSIVE",
+                "analysis_reasoning": "Detailed explanation citing specific social engineering tactics and BERT results",
+                "evidence_quality": "BERT model performance metrics and feature analysis",
+                "limitations": "Clear statement of what this agent cannot assess",
+                "findings": [list of specific behavioral indicators],
+                "recommendations": [actionable security recommendations]
+            }"""
         )
         
         return [linguistic_analysis_task]
@@ -79,23 +114,38 @@ class LinguisticAnalysisCrew(BaseCybersecurityCrew):
         })
     
     def _parse_crew_result(self, result: Any, request: AgentRequest, processing_time: float) -> AgentResponse:
-        """Parse CrewAI result into standardized response, handling ML model outputs"""
+        """Parse CrewAI result into standardized response with cybersecurity analyst reasoning"""
         
         findings = []
         recommendations = []
-        confidence_score = 0.0
+        risk_score = 0.0
+        certainty_level = "INCONCLUSIVE"
+        analysis_reasoning = "Analysis failed to produce structured output"
+        evidence_quality = "No evidence collected"
+        limitations = "Unable to perform analysis"
         
         try:
             import json
             
             model_output = None
             
-            # The tool returns JSON, but CrewAI wraps it in the agent's narrative
-            # Try to extract the JSON from the raw output
+            # Strategy 1: Try to extract JSON from agent output
             if hasattr(result, 'raw') and result.raw:
                 raw_str = str(result.raw)
-                # The LLM returns a narrative, but we want the tool's JSON output
-                # Look for JSON structure in the output
+                
+                # Remove markdown code fences if present
+                if '```json' in raw_str:
+                    json_start = raw_str.find('```json') + 7
+                    json_end = raw_str.find('```', json_start)
+                    if json_end > json_start:
+                        raw_str = raw_str[json_start:json_end].strip()
+                elif '```' in raw_str:
+                    json_start = raw_str.find('```') + 3
+                    json_end = raw_str.find('```', json_start)
+                    if json_end > json_start:
+                        raw_str = raw_str[json_start:json_end].strip()
+                
+                # Try to find JSON object
                 json_start = raw_str.find('{')
                 json_end = raw_str.rfind('}') + 1
                 
@@ -103,63 +153,104 @@ class LinguisticAnalysisCrew(BaseCybersecurityCrew):
                     try:
                         potential_json = raw_str[json_start:json_end]
                         model_output = json.loads(potential_json)
-                        logger.info(f"Extracted tool output from raw (found JSON with {len(model_output.get('indicators', []))} indicators)")
+                        logger.info(f"✅ Extracted JSON output from agent")
                     except json.JSONDecodeError as e:
-                        logger.warning(f"Failed to parse JSON from raw output: {e}")
+                        logger.warning(f"Failed to parse JSON: {e}")
             
-            # If we successfully extracted and parsed the tool output
-            if model_output and isinstance(model_output, dict) and "indicators" in model_output:
-                # Process threat indicators directly from tool
-                for indicator in model_output["indicators"]:
-                    findings.append({
-                        "type": indicator.get("type", "unknown"),
-                        "severity": str(indicator.get("severity", "low")).replace("ThreatLevel.", ""),
-                        "confidence": indicator.get("confidence", 0.5),
-                        "description": indicator.get("description", "No description"),
-                        "evidence": indicator.get("evidence", [])
-                    })
+            # Strategy 2: Try to get tool output directly
+            if not model_output and hasattr(result, 'tasks_output') and result.tasks_output:
+                for task_output in result.tasks_output:
+                    if hasattr(task_output, 'raw') and task_output.raw:
+                        try:
+                            raw_str = str(task_output.raw)
+                            json_start = raw_str.find('{')
+                            json_end = raw_str.rfind('}') + 1
+                            if json_start >= 0 and json_end > json_start:
+                                model_output = json.loads(raw_str[json_start:json_end])
+                                logger.info(f"✅ Extracted from tasks_output")
+                                break
+                        except Exception as e:
+                            continue
+            
+            # If we got structured output, extract all fields
+            if model_output and isinstance(model_output, dict):
+                # Extract new confidence structure
+                certainty_level = model_output.get("certainty_level", "MEDIUM")
+                analysis_reasoning = model_output.get("analysis_reasoning", "No reasoning provided")
+                evidence_quality = model_output.get("evidence_quality", "Evidence quality not documented")
+                limitations = model_output.get("limitations", "Limitations not specified")
                 
-                # Get confidence score from tool
-                if "confidence_score" in model_output:
-                    confidence_score = model_output["confidence_score"]
-                elif findings:
-                    confidence_score = sum(f["confidence"] for f in findings) / len(findings)
+                # Extract risk score
+                risk_score = model_output.get("risk_score", 0.5)
                 
-                # Get recommendations from tool
+                # Extract findings
+                if "findings" in model_output:
+                    raw_findings = model_output["findings"]
+                    # Convert to list of dicts if they're strings
+                    if isinstance(raw_findings, list):
+                        findings = []
+                        for f in raw_findings:
+                            if isinstance(f, str):
+                                findings.append({"description": f})
+                            elif isinstance(f, dict):
+                                findings.append(f)
+                            else:
+                                findings.append({"description": str(f)})
+                    else:
+                        findings = [{"description": str(raw_findings)}]
+                elif "indicators" in model_output:
+                    # Fallback to old format
+                    for indicator in model_output["indicators"]:
+                        findings.append({
+                            "type": indicator.get("type", "unknown"),
+                            "severity": str(indicator.get("severity", "low")).replace("ThreatLevel.", ""),
+                            "confidence": indicator.get("confidence", 0.5),
+                            "description": indicator.get("description", "No description"),
+                            "evidence": indicator.get("evidence", [])
+                        })
+                
+                # Extract recommendations
                 if "recommendations" in model_output:
-                    recommendations = model_output["recommendations"]
+                    recommendations = model_output["recommendations"] if isinstance(model_output["recommendations"], list) else [str(model_output["recommendations"])]
                 
-                logger.info(f"✅ Successfully parsed {len(findings)} indicators with {confidence_score:.2%} confidence")
+                logger.info(f"✅ Parsed linguistic analysis: {certainty_level} certainty, {risk_score:.2f} risk, {len(findings)} findings")
                 
             else:
-                # Fallback: couldn't extract tool output
-                logger.warning("Could not extract tool output, using fallback parsing")
+                # Fallback: couldn't extract structured output
+                logger.warning("Could not extract structured output, using fallback")
                 findings = [{
                     "type": "info",
-                    "severity": "info",
-                    "confidence": 0.5,
-                    "description": "Analysis completed - see LLM narrative for details",
-                    "evidence": [str(result)[:200]]  # First 200 chars of result
+                    "description": "Analysis completed - structured output not available"
                 }]
-                confidence_score = 0.5
-                recommendations = ["Review full analysis output"]
+                risk_score = 0.5
+                certainty_level = "LOW"
+                analysis_reasoning = "Agent did not produce expected structured output"
+                evidence_quality = "Unable to extract evidence from agent output"
+                limitations = "Analysis produced narrative instead of structured data"
+                recommendations = ["Retry analysis with explicit JSON formatting"]
             
         except Exception as e:
-            logger.error(f"Error parsing ML model results: {str(e)}", exc_info=True)
+            logger.error(f"Error parsing linguistic analysis: {str(e)}", exc_info=True)
             findings = [{
                 "type": "error",
-                "severity": "high",
-                "confidence": 1.0,
-                "description": f"Failed to process ML model output: {str(e)}"
+                "description": f"Failed to process analysis output: {str(e)}"
             }]
             recommendations = ["Manual review required due to processing error"]
-            confidence_score = 0.0
+            risk_score = 0.0
+            certainty_level = "INCONCLUSIVE"
+            analysis_reasoning = f"Parser error: {str(e)}"
+            evidence_quality = "No evidence - parsing failed"
+            limitations = "Complete analysis failure"
         
         return AgentResponse(
             agent_name=self.crew_name,
             request_id=request.request_id,
             status="success",
-            confidence_score=confidence_score,
+            risk_score=risk_score,
+            certainty_level=certainty_level,
+            analysis_reasoning=analysis_reasoning,
+            evidence_quality=evidence_quality,
+            limitations=limitations,
             findings=findings,
             recommendations=recommendations,
             processing_time=processing_time,
