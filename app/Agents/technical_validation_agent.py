@@ -9,7 +9,7 @@ import logging
 import json
 
 from app.Tools.technical_validation import TechnicalValidationTool
-from app.LLM.llm import get_gemini_flash
+from app.LLM.llm import get_mistral_small
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -42,7 +42,7 @@ class TechnicalValidationCrew(BaseCybersecurityCrew):
             
             2. DATA QUALITY INDICATORS: You document WHOIS lookup reliability
                - WHOIS data availability (some registrars protect privacy)
-               - Registration date accuracy (some show last update, not creation)
+               - Registration date accuracy (some shows last update, not creation)
                - Domain registrar reputation
             
             3. CONTEXTUAL REASONING: You explain infrastructure risk patterns
@@ -56,12 +56,16 @@ class TechnicalValidationCrew(BaseCybersecurityCrew):
             - EVIDENCE QUALITY documenting WHOIS source, data completeness, lookup success/failure
             - LIMITATIONS noting you cannot assess: content safety, sender authenticity, IP reputation, link destinations
             
+            CRITICAL: Call the Technical Email Validation Tool ONLY ONCE. The tool's output is authoritative and complete.
+            Do NOT re-run the tool or second-guess its results. Trust the WHOIS data and provide your analysis immediately.
+            
             You DO NOT analyze email content, URLs, or IPs - that's for other specialized agents.
             You focus purely on sender domain infrastructure.""",
             tools=[self.technical_tool],
-            llm=get_gemini_flash(),
+            llm=get_mistral_small(),
             verbose=True,
-            allow_delegation=False
+            allow_delegation=False,
+            max_iter=3  # Limit iterations to prevent redundant tool calls
         )
         
         return [domain_validator]

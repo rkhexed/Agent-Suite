@@ -1,7 +1,7 @@
 """
 Explainability Helper - LLM-based explanation generation
 
-Uses Gemini Flash to synthesize findings from all agents into coherent narratives
+Uses Mistral Small to synthesize findings from all agents into coherent narratives
 """
 import logging
 from typing import Dict, List, Any
@@ -21,8 +21,8 @@ class ExplanationGenerator:
     
     def __init__(self):
         """Initialize LLM configuration for explanation generation"""
-        self.model = "gemini/gemini-2.0-flash-exp"
-        self.api_key = os.getenv("GEMINI_KEY")
+        self.model = "mistral/mistral-small-latest"
+        self.api_key = os.getenv("MISTRAL_KEY")
         self.temperature = 0.1
         self.max_tokens = 2000
     

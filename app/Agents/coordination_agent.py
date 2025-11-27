@@ -232,7 +232,7 @@ class CoordinationCrew(BaseCybersecurityCrew):
                     "dima806/phishing-email-detection (BERT 99.98%)",
                     "all-MiniLM-L6-v2 (embeddings)",
                     "dslim/bert-base-NER",
-                    "Gemini Flash 2.0 (explainability)"
+                    "Mistral Small (explainability)"
                 ],
                 "external_apis_called": [
                     "Google Safe Browsing",
