@@ -49,11 +49,54 @@ class DomainValidation(BaseModel):
 class TechnicalValidationResult(BaseModel):
     """Lightweight technical validation result"""
     risk_score: float = Field(ge=0.0, le=1.0)
-    confidence: float = Field(ge=0.0, le=1.0)
-    domain_validation: DomainValidation
-    url_count: int = 0
-    has_external_links: bool = False
-    processing_time_ms: int
+
+
+# ============================================================================
+# API Request/Response Models
+# ============================================================================
+
+class EmailData(BaseModel):
+    """Email data structure for API"""
+    email_id: str = Field(..., description="Unique identifier for the email")
+    subject: str = Field(..., description="Email subject line")
+    sender: str = Field(..., description="Sender email address")
+    recipient: Optional[str] = Field(None, description="Recipient email address")
+    body: str = Field(..., description="Email body content")
+    headers: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Email headers")
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional metadata")
+
+
+class AnalyzeRequest(BaseModel):
+    """Request model for agent analysis"""
+    email_id: str
+    subject: str
+    sender: str
+    recipient: Optional[str] = None
+    body: str
+    headers: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class AgentResponse(BaseModel):
+    """Standardized agent response model"""
+    agent: str = Field(..., description="Agent name")
+    email_id: str = Field(..., description="Email identifier")
+    risk_score: float = Field(..., ge=0.0, le=1.0, description="Risk score (0-1)")
+    threat_level: str = Field(..., description="Threat level: LOW, MEDIUM, HIGH, CRITICAL")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence score (0-1)")
+    indicators: list = Field(default_factory=list, description="List of detected indicators")
+    analysis: str = Field(..., description="Detailed analysis explanation")
+    timestamp: str = Field(..., description="Analysis timestamp")
+    execution_time_ms: int = Field(..., description="Execution time in milliseconds")
+
+
+class CoordinationRequest(BaseModel):
+    """Request model for coordination agent"""
+    email_id: str
+    linguistic_result: Dict[str, Any]
+    technical_result: Dict[str, Any]
+    threat_intel_result: Dict[str, Any]
+    email_data: Optional[Dict[str, Any]] = None
 
 class TechnicalValidationInput(BaseModel):
     """Input schema for Technical Validation Tool"""
