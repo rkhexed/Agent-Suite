@@ -280,6 +280,8 @@ def get_email_by_id(email_id: str) -> Optional[Dict[str, Any]]:
     """
     db = SessionLocal()
     try:
+        logger.info(f"Getting email details for ID: {email_id}")
+        
         # Get email
         email_result = db.execute(
             text("SELECT * FROM emails WHERE id = :id"),
@@ -287,6 +289,7 @@ def get_email_by_id(email_id: str) -> Optional[Dict[str, Any]]:
         ).fetchone()
         
         if not email_result:
+            logger.warning(f"Email {email_id} not found")
             return None
         
         # Get all agent analyses
@@ -301,14 +304,13 @@ def get_email_by_id(email_id: str) -> Optional[Dict[str, Any]]:
             {"id": email_id}
         ).fetchall()
         
-        # Get coordination result
-        coordination_result = db.execute(
-            text("SELECT * FROM coordination_results WHERE email_id = :id"),
-            {"id": email_id}
-        ).fetchone()
-        
         # Build response
         email_dict = dict(email_result._mapping)
+        
+        # Handle received_at datetime
+        received_at = email_dict.get("received_at")
+        
+        logger.info(f"Found email with {len(analyses_result)} analyses")
         
         return {
             "email": {
@@ -318,7 +320,7 @@ def get_email_by_id(email_id: str) -> Optional[Dict[str, Any]]:
                 "sender": email_dict["sender"],
                 "recipient": email_dict["recipient"],
                 "body": email_dict["body"],
-                "received_at": email_dict["received_at"].isoformat() if email_dict.get("received_at") else None,
+                "received_at": received_at,
                 "final_risk_score": email_dict.get("final_risk_score"),
                 "final_threat_level": email_dict.get("final_threat_level"),
                 "final_action": email_dict.get("final_action")
@@ -333,12 +335,11 @@ def get_email_by_id(email_id: str) -> Optional[Dict[str, Any]]:
                     "execution_time_ms": row.execution_time_ms
                 }
                 for row in analyses_result
-            },
-            "coordination": dict(coordination_result._mapping) if coordination_result else None
+            }
         }
         
     except Exception as e:
-        logger.error(f"Failed to retrieve email: {str(e)}")
+        logger.error(f"Failed to retrieve email: {str(e)}", exc_info=True)
         return None
     finally:
         db.close()
@@ -357,6 +358,7 @@ def list_recent_emails(limit: int = 10, offset: int = 0) -> List[Dict[str, Any]]
     """
     db = SessionLocal()
     try:
+        logger.info(f"Querying emails with limit={limit}, offset={offset}")
         results = db.execute(
             text("""
                 SELECT 
@@ -378,20 +380,33 @@ def list_recent_emails(limit: int = 10, offset: int = 0) -> List[Dict[str, Any]]
             {"limit": limit, "offset": offset}
         ).fetchall()
         
-        return [
-            {
-                "id": str(row.id),
-                "subject": row.subject,
-                "sender": row.sender,
-                "recipient": row.recipient,
-                "received_at": row.received_at.isoformat() if row.received_at else None,
-                "risk_score": row.final_risk_score,
-                "threat_level": row.final_threat_level,
-                "action": row.final_action,
-                "has_full_analysis": row.analysis_count >= 4
-            }
-            for row in results
-        ]
+        logger.info(f"Query returned {len(results)} rows")
+        
+        emails = []
+        for row in results:
+            try:
+                # Handle received_at - might be string or datetime
+                received_at = row[4]
+                if received_at and not isinstance(received_at, str):
+                    received_at = received_at.isoformat()
+                
+                emails.append({
+                    "id": str(row[0]),  # e.id
+                    "subject": row[1],  # e.subject
+                    "sender": row[2],  # e.sender
+                    "recipient": row[3],  # e.recipient
+                    "received_at": received_at,  # e.received_at
+                    "final_risk_score": row[5],  # e.final_risk_score
+                    "final_threat_level": row[6],  # e.final_threat_level
+                    "final_action": row[7],  # e.final_action
+                    "analysis_count": row[8]  # COUNT(a.id)
+                })
+            except Exception as e:
+                logger.error(f"Failed to parse row: {str(e)} | Row data: {row}")
+                continue
+        
+        logger.info(f"Successfully parsed {len(emails)} emails")
+        return emails
         
     except Exception as e:
         logger.error(f"Failed to list emails: {str(e)}")

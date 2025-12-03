@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 """
 FastAPI Main Server - Multi-Agent Email Security System
@@ -11,11 +10,12 @@ from typing import Dict, Any
 import time
 import asyncio
 import logging
+from datetime import datetime
 
 # Add the app directory to Python path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'app'))
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
@@ -476,6 +476,162 @@ async def get_email_details(email_id: str):
     except Exception as e:
         logger.error(f"Failed to retrieve email {email_id}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to retrieve email: {str(e)}")
+    
+@app.get("/api/emails/{email_id}/details")
+async def get_email_details(email_id: str):
+    """
+    Returns concise email details for frontend display.
+    """
+    from app.Helper.helper_database import get_email_by_id
+    email_data = get_email_by_id(email_id)
+    if not email_data:
+        raise HTTPException(status_code=404, detail=f"Email {email_id} not found")
+    email = email_data["email"]
+    return {
+        "id": email["id"],
+        "sender": email["sender"],
+        "subject": email["subject"],
+        "timestamp": email["received_at"],
+        "body": email["body"],
+        "final_risk_score": email.get("final_risk_score"),
+        "final_action": email.get("final_action")
+    }
+
+
+# ============================================================================
+# Email Review Chat Endpoints (5th Agent)
+# ============================================================================
+
+from pydantic import BaseModel
+
+class ChatRequest(BaseModel):
+    message: str
+
+@app.post("/api/emails/{email_id}/chat")
+async def chat_about_email(email_id: str, request: ChatRequest):
+    """
+    Chat with AI about a specific email's security analysis (text-based).
+    
+    Path Parameters:
+    - email_id: UUID of the email
+    
+    Body Parameters:
+    - message: User's question/message
+    
+    Returns:
+    - response: AI's response to the user's question
+    - timestamp: Response timestamp
+    """
+    try:
+        from app.Agents.email_review_chat_agent import EmailReviewChatAgent
+        message = request.message
+        logger.info(f"Chat request for email {email_id}: {message[:100]}")
+        
+        # Get email data with all analyses
+        email_data = get_email_by_id(email_id)
+        if not email_data:
+            raise HTTPException(status_code=404, detail=f"Email {email_id} not found")
+        
+        # Initialize chat agent
+        chat_agent = EmailReviewChatAgent()
+        
+        # Get response
+        response = chat_agent.chat(
+            email_data=email_data,
+            user_message=message,
+            conversation_history=None  # TODO: Add session management for history
+        )
+        
+        logger.info(f"Chat response generated for email {email_id}")
+        
+        return {
+            "email_id": email_id,
+            "response": response,
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Chat failed for email {email_id}: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
+
+
+@app.post("/api/emails/{email_id}/chat/voice")
+async def chat_about_email_voice(email_id: str, audio: UploadFile = File(...)):
+    """
+    Chat with AI about a specific email's security analysis using voice input.
+    
+    Path Parameters:
+    - email_id: UUID of the email
+    
+    Body Parameters:
+    - audio: Audio file (mp3, wav, m4a, etc.)
+    
+    Returns:
+    - transcription: What the user said
+    - response: AI's response to the user's question
+    - timestamp: Response timestamp
+    """
+    import tempfile
+    import whisper
+    
+    try:
+        from app.Agents.email_review_chat_agent import EmailReviewChatAgent
+        
+        logger.info(f"Voice chat request for email {email_id}")
+        
+        # Get email data with all analyses
+        email_data = get_email_by_id(email_id)
+        if not email_data:
+            raise HTTPException(status_code=404, detail=f"Email {email_id} not found")
+        
+        # Save uploaded audio to temp file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
+            content = await audio.read()
+            temp_audio.write(content)
+            temp_audio_path = temp_audio.name
+        
+        try:
+            # Load Whisper model (using 'base' for balance of speed/accuracy)
+            logger.info("Loading Whisper model...")
+            model = whisper.load_model("base")  # Options: tiny, base, small, medium, large
+            
+            # Transcribe audio
+            logger.info(f"Transcribing audio file: {audio.filename}")
+            result = model.transcribe(temp_audio_path)
+            transcription = result["text"]
+            
+            logger.info(f"Transcription: {transcription}")
+            
+            # Initialize chat agent
+            chat_agent = EmailReviewChatAgent()
+            
+            # Get response using transcribed text
+            response = chat_agent.chat(
+                email_data=email_data,
+                user_message=transcription,
+                conversation_history=None
+            )
+            
+            logger.info(f"Voice chat response generated for email {email_id}")
+            
+            return {
+                "email_id": email_id,
+                "transcription": transcription,
+                "response": response,
+                "timestamp": datetime.utcnow().isoformat() + "Z"
+            }
+            
+        finally:
+            # Clean up temp file
+            os.remove(temp_audio_path)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Voice chat failed for email {email_id}: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Voice chat failed: {str(e)}")
 
 
 # ============================================================================
