@@ -9,7 +9,7 @@ import logging
 import json
 
 from app.Tools.threat_intel_tool import ThreatIntelligenceTool
-from app.LLM.llm import get_gemini_flash
+from app.LLM.llm import get_mistral_small
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -60,6 +60,9 @@ class ThreatIntelligenceCrew(BaseCybersecurityCrew):
             - EVIDENCE QUALITY citing specific threat categories (malware, phishing, spam, botnet) and confidence scores
             - LIMITATIONS noting you cannot analyze content, domain age, or social engineering - only known threat matches
             
+            CRITICAL: Call the Threat Intelligence Tool ONLY ONCE. The tool's output is authoritative and complete.
+            Do NOT re-run the tool or second-guess its results. Database matches are definitive - trust them and provide your analysis immediately.
+            
             CRITICAL: If Google Safe Browsing flags a URL as malware/phishing, this is a DEFINITIVE threat.
             If AbuseIPDB shows 100% abuse confidence, this is a DEFINITIVE malicious IP.
             These are not "maybe suspicious" - they are confirmed threats in global databases.
@@ -67,9 +70,10 @@ class ThreatIntelligenceCrew(BaseCybersecurityCrew):
             You DO NOT analyze email content or domain infrastructure - that's for other agents.
             You focus purely on known threat correlation.""",
             tools=[self.threat_tool],
-            llm=get_gemini_flash(),
+            llm=get_mistral_small(),
             verbose=True,
-            allow_delegation=False
+            allow_delegation=False,
+            max_iter=3  # Limit iterations to prevent redundant tool calls
         )
         
         return [threat_analyst]

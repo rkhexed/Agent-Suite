@@ -12,8 +12,8 @@ class ThreatLevel(Enum):
 class EmailContent(BaseModel):
     subject: str
     body: str
-    sender: EmailStr
-    recipients: List[EmailStr]
+    sender: str  # Changed from EmailStr to allow special-use domains like .local
+    recipients: List[str]  # Changed from List[EmailStr] to allow special-use domains
     date: datetime
     headers: Dict[str, str]
 

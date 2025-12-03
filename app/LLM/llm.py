@@ -8,10 +8,11 @@ load_dotenv()
 # Get API keys from environment
 GEMINI_API_KEY = os.getenv("GEMINI_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+MISTRAL_API_KEY = os.getenv("MISTRAL_KEY")
 
-# Set environment variables for CrewAI to use Gemini
-os.environ["GEMINI_API_KEY"] = GEMINI_API_KEY
-os.environ["MODEL"] = "gemini/gemini-2.0-flash"
+# Set environment variables for CrewAI to use Mistral by default
+os.environ["MISTRAL_API_KEY"] = MISTRAL_API_KEY
+os.environ["MODEL"] = "mistral/open-mistral-7b"  # Changed from mistral-small-latest to try different rate limits
 
 
 def get_gemini_llm(model: str = "gemini/gemini-2.0-flash", temperature: float = 0.1):
@@ -142,5 +143,73 @@ def get_groq_mixtral():
     """
     return get_groq_llm(
         model="mixtral-8x7b-32768",
+        temperature=0.1
+    )
+
+
+def get_mistral_llm(model: str = "mistral-small-latest", temperature: float = 0.1):
+    """
+    Create a Mistral LLM instance for CrewAI agents.
+    
+    Args:
+        model: Mistral model to use (e.g., "mistral-large-latest", "mistral-medium-latest")
+        temperature: Temperature for response generation (0.0-1.0, lower = more deterministic)
+        
+    Returns:
+        Configured LLM instance for CrewAI
+    """
+    try:
+        if not MISTRAL_API_KEY:
+            raise ValueError("MISTRAL_API_KEY not found in environment variables")
+            
+        crew_llm = LLM(
+            model=f"mistral/{model}",
+            api_key=MISTRAL_API_KEY,
+            temperature=temperature
+        )
+        
+        return crew_llm
+        
+    except Exception as e:
+        raise RuntimeError(f"Failed to initialize Mistral LLM: {str(e)}")
+
+
+def get_mistral_small():
+    """
+    Get Mistral Small model for fast, efficient analysis.
+    Recommended for free tier usage - 1B tokens available.
+    
+    Returns:
+        Mistral Small LLM instance
+    """
+    return get_mistral_llm(
+        model="mistral-small-latest",
+        temperature=0.1
+    )
+
+
+def get_mistral_large():
+    """
+    Get Mistral Large model for high-quality analysis.
+    Note: May be rate limited on free tier.
+    
+    Returns:
+        Mistral Large LLM instance
+    """
+    return get_mistral_llm(
+        model="mistral-large-latest",
+        temperature=0.1
+    )
+
+
+def get_mistral_medium():
+    """
+    Get Mistral Medium model for balanced performance.
+    
+    Returns:
+        Mistral Medium LLM instance
+    """
+    return get_mistral_llm(
+        model="mistral-medium-latest",
         temperature=0.1
     )

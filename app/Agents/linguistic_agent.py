@@ -6,7 +6,7 @@ import logging
 
 from app.Tools.email_analysis import EmailContentAnalysisTool
 from app.ML.semantic_analysis import SemanticAnalyzer
-from app.LLM.llm import get_gemini_flash  # Using Gemini Flash (1500 req/day FREE)
+from app.LLM.llm import get_mistral_small  # Using Mistral Small (1B tokens FREE)
 from app.Helper.helper_pydantic import ThreatLevel, ThreatIndicator
 
 # Configure logging
@@ -45,12 +45,16 @@ class LinguisticAnalysisCrew(BaseCybersecurityCrew):
             - EVIDENCE QUALITY documenting BERT model performance and which features triggered detection
             - LIMITATIONS noting what you cannot assess (sender authenticity, technical infrastructure, etc.)
             
+            CRITICAL: Call the Advanced Email Analysis Tool ONLY ONCE. The tool's output is authoritative and complete.
+            Do NOT re-run the tool or second-guess its results. Trust the ML model output and provide your analysis immediately.
+            
             You DO NOT make claims about technical aspects (DNS, IP reputation, etc.) - that's for other agents.
             You focus purely on content analysis and behavioral patterns.""",
             tools=[self.email_tool],
-            llm=get_gemini_flash(),
+            llm=get_mistral_small(),
             verbose=True,
-            allow_delegation=False
+            allow_delegation=False,
+            max_iter=3  # Limit iterations to prevent redundant tool calls
         )
         
         return [linguistic_expert]
@@ -60,21 +64,23 @@ class LinguisticAnalysisCrew(BaseCybersecurityCrew):
         
         linguistic_analysis_task = Task(
             description="""Perform cybersecurity analyst-level behavioral analysis of email content.
-            Use the EmailContentAnalysisTool to analyze the email, then provide detailed reasoning:
+            
+            STEP 1: Call the EmailContentAnalysisTool ONCE with the email_data to get ML analysis
+            STEP 2: Immediately use the tool output to create your final answer - do NOT call the tool again
+            STEP 3: Return the complete JSON response with all required fields
             
             ANALYSIS APPROACH (think like a SOC analyst):
-            1. **BERT Model Assessment**: Run the phishing detection model and interpret results
-               - What's the model prediction and confidence?
+            1. **BERT Model Assessment**: Interpret the tool's model prediction
                - Note: dima806/phishing-email-detection has 99.98% accuracy on test set
                - Predictions >0.95 are highly reliable, 0.80-0.95 are strong, 0.60-0.80 need context
             
-            2. **Social Engineering Tactics**: Identify specific manipulation techniques
+            2. **Social Engineering Tactics**: Identify specific manipulation techniques from tool output
                - Urgency/time pressure ("within 24 hours", "immediately", "expires soon")
                - Authority impersonation (claims to be from IT, bank, executive)
                - Fear/consequences ("account suspended", "security breach", "legal action")
                - Reward/scarcity ("limited offer", "exclusive access")
             
-            3. **Behavioral Indicators**: Document psychological patterns
+            3. **Behavioral Indicators**: Document psychological patterns from email content
                - Unusual requests (credentials, payments, downloads)
                - Inconsistent tone (formal subject, informal body)
                - Generic greetings vs. personalized content
@@ -84,13 +90,15 @@ class LinguisticAnalysisCrew(BaseCybersecurityCrew):
             Metadata: {metadata}
             
             REQUIRED OUTPUT FORMAT (provide ALL fields):
-            - risk_score: Float 0.0-1.0 (use BERT model confidence as primary signal)
+            - risk_score: Float 0.0-1.0 (use BERT model confidence from tool output)
             - certainty_level: DEFINITIVE (BERT >0.95) / HIGH (>0.80) / MEDIUM (>0.60) / LOW (<0.60) / INCONCLUSIVE (error)
             - analysis_reasoning: Detailed explanation of WHY this assessment - cite specific tactics observed
             - evidence_quality: "BERT phishing model (99.98% accuracy) confidence: X.XX. Features detected: [list]. Model limitations: [note]"
             - limitations: "Cannot assess: sender IP reputation, domain authenticity, link destinations, attachment safety. Content analysis only."
             - findings: List of specific indicators found (urgency, authority claims, suspicious requests)
-            - recommendations: Actionable advice based on behavioral analysis""",
+            - recommendations: Actionable advice based on behavioral analysis
+            
+            CRITICAL: Call the tool ONLY ONCE, then provide your final answer immediately.""",
             agent=self.agents[0],
             expected_output="""JSON object with complete cybersecurity analyst assessment:
             {
